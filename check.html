@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FATAL LINKS install check</title>
+<style>
+body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:16px;background:#F4F8FF;color:#0B1B4D}
+h1{font-size:22px;margin:0 0 4px} p{margin:4px 0 12px;color:#41507A}
+.sum{padding:12px 14px;border-radius:12px;font-weight:700;margin:12px 0}
+.ok{background:#DDF5E6;color:#0B5A2C}.bad{background:#FDE2E2;color:#8A1212}
+ul{list-style:none;padding:0;margin:0}li{display:flex;justify-content:space-between;gap:8px;padding:10px 12px;background:#fff;border:1px solid #D7E1F7;border-radius:10px;margin-bottom:8px}
+b.g{color:#0B7A3A}b.r{color:#C21818}a{color:#1448B8;font-weight:600}
+</style></head><body>
+<h1>Install check</h1>
+<p>This page tests whether every file of the app is online. Nothing is changed.</p>
+<div id="sum" class="sum">Checking...</div>
+<ul id="out"></ul>
+<p id="env"></p>
+<p><a href="./">Back to the app</a></p>
+<script>
+const FILES=['index.html','styles.css','app.js','data.js','i18n.js','sw.js','manifest.json','logo.png','icon-192.png','icon-512.png','icon-maskable-512.png'];
+const out=document.getElementById('out'),sum=document.getElementById('sum'),env=document.getElementById('env');
+const row=(n,ok,txt)=>{const li=document.createElement('li');li.innerHTML='<span>'+n+'</span><b class="'+(ok?'g':'r')+'">'+txt+'</b>';out.appendChild(li);};
+(async()=>{
+  let missing=[];
+  for(const f of FILES){
+    try{const r=await fetch(f+'?t='+Date.now(),{cache:'no-store'});
+      if(r.ok){row(f,true,'found');}else{row(f,false,'MISSING ('+r.status+')');missing.push(f);}
+    }catch(e){row(f,false,'ERROR');missing.push(f);}
+  }
+  try{const m=await (await fetch('manifest.json?t='+Date.now(),{cache:'no-store'})).json();
+    row('manifest readable',true,m.name+' / '+(m.icons||[]).length+' icons');
+  }catch(e){row('manifest readable',false,'cannot read');missing.push('manifest.json (unreadable)');}
+  const reg='serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration('./') : null;
+  row('offline worker',!!reg,reg?'active':'not active yet (open the app once, then reload)');
+  row('secure (https)',location.protocol==='https:',location.protocol);
+  const standalone=matchMedia('(display-mode: standalone)').matches;
+  env.textContent='Opened as installed app: '+(standalone?'yes':'no (browser tab)');
+  if(missing.length){sum.className='sum bad';sum.textContent='Problem: '+missing.join(', ')+'. Upload or rename these files in your repo.';}
+  else{sum.className='sum ok';sum.textContent='All files found. The app can be installed.';}
+})();
+</script></body></html>

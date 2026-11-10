@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>FATAL LINKS</title>
   <meta name="description" content="First aid at your fingertips. Concept prototype.">
-  <meta name="theme-color" content="#0E5A3F">
+  <meta name="theme-color" content="#0E2A80">
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="icon-192.png">
+  <link rel="icon" type="image/png" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,10 +15,17 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header id="hdr" class="hdr"></header>
+  <div id="splash" class="splash" aria-hidden="true">
+    <img src="logo.png" alt="">
+    <p>First Aid at Your Fingertips</p>
+    <div class="bar"><span></span></div>
+  </div>
+
   <div id="banner" class="banner" role="note"></div>
+  <header id="hdr" class="hdr"></header>
   <main id="app" class="main" tabindex="-1"></main>
   <nav id="nav" class="nav" aria-label="Main"></nav>
+  <div id="drawer" class="drawer" hidden></div>
 
   <script src="i18n.js"></script>
   <script src="data.js"></script>

@@ -1,14 +1,19 @@
 // Service worker: lets the app open without internet.
-// Strategy: try the network first (so updates show up), fall back to the saved copy.
-// Change CACHE's version number whenever you want to force a full refresh.
-const CACHE = 'fatal-links-v1';
+// Network first (so updates show up), saved copy as backup.
+// Change the number in CACHE (v2 -> v3) to force every phone to refresh.
+const CACHE = 'fatal-links-v2';
 const FILES = [
   './', './index.html', './styles.css', './app.js', './data.js', './i18n.js',
-  './manifest.json', './icon-192.png', './icon-512.png'
+  './manifest.json', './logo.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // Save files one by one so a single missing file cannot break the whole install.
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => Promise.all(FILES.map((f) => c.add(f).catch(() => null))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -25,10 +30,14 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     fetch(req)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(req, copy));
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+        }
         return res;
       })
-      .catch(() => caches.match(req).then((hit) => hit || caches.match('./index.html')))
+      .catch(() =>
+        caches.match(req).then((hit) => hit || caches.match('./index.html') || caches.match('./'))
+      )
   );
 });
