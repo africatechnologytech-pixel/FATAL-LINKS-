@@ -193,3 +193,31 @@ dd { margin: 0; }
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
   .splash .bar span { width: 100%; }
 }
+
+/* sign-in + profile forms */
+.seg { display: flex; background: var(--sky); border-radius: 999px; padding: 3px; margin: 8px 0 12px; }
+.seg button { flex: 1; min-height: 46px; border: 0; background: none; border-radius: 999px; font-weight: 700; color: var(--navy); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--navy); color: #fff; }
+.fld { margin-bottom: 14px; }
+.fld > label:first-child { display: block; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+.fld input[type=text], .fld input[type=email], .fld input[type=password], .fld input[type=tel], .fld input[type=number], .fld select, .fld textarea {
+  width: 100%; min-height: 50px; padding: 10px 14px; font: inherit; color: var(--ink); background: #fff;
+  border: 2px solid var(--line); border-radius: 14px;
+}
+.fld textarea { min-height: 76px; resize: vertical; }
+.fld input:focus, .fld select:focus, .fld textarea:focus { border-color: var(--blue); outline: none; box-shadow: 0 0 0 3px rgba(30,95,224,.2); }
+.shr { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 15px; color: var(--ink-2); cursor: pointer; }
+.shr input { width: 24px; height: 24px; accent-color: var(--navy); flex: none; }
+.shr.consent { background: var(--sky-2); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-bottom: 14px; color: var(--ink); }
+.err { background: #FDE3E6; color: #8A1118; border-radius: 12px; padding: 8px 12px; font-size: 15px; margin: 0 0 12px; }
+.err.ok { background: #DDF5E6; color: #0B5A2C; }
+.linkbtn { display: block; margin: 12px auto 0; min-height: 44px; border: 0; background: none; color: var(--blue); font-weight: 700; text-decoration: underline; cursor: pointer; }
+.secbtn { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; margin-top: 10px; border: 2px solid var(--navy); border-radius: 999px; background: #fff; color: var(--navy); font-weight: 700; text-decoration: none; cursor: pointer; }
+.chip { display: inline-block; margin-left: 8px; padding: 1px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 700; background: #E6E9F2; color: var(--ink-2); vertical-align: middle; }
+.chip.on { background: #DDF5E6; color: #0B5A2C; }
+.none { color: var(--ink-2); }
+dl.med { grid-template-columns: 1fr; gap: 2px; }
+dl.med dt { margin-top: 8px; }
+.pcard .chip { margin-left: 0; margin-top: 6px; }
+dl.med dd .chip { margin-left: 8px; margin-top: 0; }
+a.bigbtn.link { margin-top: 10px; }

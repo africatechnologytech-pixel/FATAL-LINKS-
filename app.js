@@ -9,12 +9,16 @@
   let installEvent = null;
   let speaking = false;
   let currentGuide = null;
+  let user;                 // undefined = still checking, null = signed out, object = signed in
+  let fbState = 'loading';  // loading | ready | failed
+  let authMode = 'signin';
 
   /* ---------- helpers ---------- */
   const t = (k) => (I18N[lang] && I18N[lang][k]) || I18N.en[k] || k;
   const loc = (o) => (o && (o[lang] || o.en)) || '';
   const fmtDate = (d) =>
     new Date(d + 'T00:00:00').toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
+  const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const todayISO = () => new Date().toISOString().slice(0, 10);
 
   const dlGet = () => { try { return JSON.parse(localStorage.getItem('fl_dl') || '{}'); } catch (e) { return {}; } };
@@ -40,6 +44,7 @@
     alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     check: '<circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-6"/>',
+    pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
     drop: '<path d="M12 3C8 9 6 12 6 15a6 6 0 0 0 12 0c0-3-2-6-6-12z"/>',
     heart: '<path d="M12 20s-8-5-8-11a4.5 4.5 0 0 1 8-2.5A4.5 4.5 0 0 1 20 9c0 6-8 11-8 11z"/>',
     pill: '<rect x="3" y="9" width="18" height="6" rx="3" transform="rotate(-35 12 12)"/><path d="M10 7.5l4.5 4.5" transform="rotate(0)"/>'
@@ -64,8 +69,9 @@
     search: { title: 'procTitle', back: '#/' },
     guide: { title: 'guideTitle', back: '#/library', speaker: true },
     scan: { title: 'scanTitle', back: '#/' },
-    profile: { title: 'epTitle', back: '#/' },
-    'emergency-profile': { title: 'epTitle', back: '#/' },
+    profile: { title: 'epTitle', back: '#/', edit: true },
+    'emergency-profile': { title: 'epTitle', back: '#/', edit: true },
+    'profile-edit': { title: 'epEditTitle', back: '#/profile' },
     offline: { title: 'offTitle', back: '#/' },
     updates: { title: 'updatesTitle', back: '#/' }
   };
@@ -94,11 +100,11 @@
           <h1 class="ptitle">${t(p.title)}</h1>
           ${p.speaker
             ? `<button type="button" class="iconbtn light" data-action="read" aria-label="${t('readAloud')}" ${lang !== 'en' ? 'disabled' : ''}>${icon('speaker')}</button>`
-            : '<span class="iconbtn"></span>'}
+            : (p.edit && user ? `<a class="iconbtn light" href="#/profile-edit" aria-label="${t('editProfile')}">${icon('pen')}</a>` : '<span class="iconbtn"></span>')}
         </div>`;
     }
 
-    const active = { home: 'home', library: 'guides', search: 'guides', guide: 'guides', scan: 'scan', profile: 'profile', 'emergency-profile': 'profile', offline: 'offline' }[name];
+    const active = { home: 'home', library: 'guides', search: 'guides', guide: 'guides', scan: 'scan', profile: 'profile', 'emergency-profile': 'profile', 'profile-edit': 'profile', offline: 'offline' }[name];
     const items = [
       ['home', '#/', 'home', 'navHome'],
       ['guides', '#/library', 'book', 'navGuides'],
@@ -221,36 +227,213 @@
       <p class="notice info">${t('scanSoon')}</p>`;
   }
 
-  async function profileView() {
+  /* ---------- sign-in + emergency profile ---------- */
+  const FIELDS = [
+    { k: 'name', label: 'fullName', type: 'text', max: 80 },
+    { k: 'age', label: 'age', type: 'number' },
+    { k: 'blood', label: 'bloodGroup', type: 'select' },
+    { k: 'allergies', label: 'allergies', type: 'textarea', max: 300 },
+    { k: 'conditions', label: 'conditions', type: 'textarea', max: 300 },
+    { k: 'medications', label: 'medications', type: 'textarea', max: 300 },
+    { k: 'contactName', label: 'contactName', type: 'text', max: 80 },
+    { k: 'contactPhone', label: 'contactPhone', type: 'tel', max: 30 }
+  ];
+  const BLOODS = ['', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
+  const cacheGet = () => { try { return JSON.parse(localStorage.getItem('fl_pcache') || 'null'); } catch (e) { return null; } };
+  const cacheSet = (uid, email, profile) => {
+    try { const p = Object.assign({}, profile); delete p.updatedAt; localStorage.setItem('fl_pcache', JSON.stringify({ uid, email, profile: p })); } catch (e) {}
+  };
+
+  const authErr = (e) => {
+    const c = (e && e.code) || '';
+    const m = {
+      'auth/invalid-email': 'errEmail', 'auth/email-already-in-use': 'errInUse', 'auth/weak-password': 'errWeak',
+      'auth/invalid-credential': 'errCred', 'auth/user-not-found': 'errCred', 'auth/wrong-password': 'errCred',
+      'auth/missing-password': 'errCred', 'auth/network-request-failed': 'errNet', 'auth/too-many-requests': 'errMany',
+      'auth/unauthorized-domain': 'errDomain', 'auth/operation-not-allowed': 'errOp'
+    }[c];
+    return m ? t(m) : t('errGeneric') + (c ? ' (' + c + ')' : '');
+  };
+
+  const initials = (n) => (n || '?').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+
+  async function sampleBlock() {
     const p = await DataService.getProfile();
-    const initials = p.name.split(' ').map((w) => w[0]).join('').slice(0, 2);
     return `
-      <div class="pcard head">
-        <span class="avatar">${initials}</span>
-        <div><strong class="pname">${p.name}</strong><span class="pmeta">${p.age} &middot; ${t('bloodGroup')}</span>
-          <span class="blood">${icon('drop')}${p.blood}</span></div>
-      </div>
+      <h2 class="sec">${t('exampleProfile')}</h2>
+      <div class="pcard head"><span class="avatar">${esc(initials(p.name))}</span>
+        <div><strong class="pname">${esc(p.name)}</strong><span class="pmeta">${p.age} &middot; ${t('bloodGroup')}</span>
+        <span class="blood">${icon('drop')}${esc(p.blood)}</span></div></div>
       <p class="notice">${t('demoProfile')}</p>
+      <div class="pcard"><h2>${t('medInfo')}</h2><dl>
+        <dt>${icon('alert')}${t('allergies')}</dt><dd>${esc(p.allergies)}</dd>
+        <dt>${icon('heart')}${t('conditions')}</dt><dd>${esc(p.conditions)}</dd>
+        <dt>${icon('pill')}${t('medications')}</dt><dd>${esc(p.medications)}</dd></dl></div>
+      <div class="pcard"><h2>${t('contact')}</h2>
+        <a class="contact" href="tel:${esc(p.contact.replace(/\s/g, ''))}">${icon('phone')}<span>${esc(p.contact)}</span></a></div>`;
+  }
+
+  function authCard() {
+    const up = authMode === 'signup';
+    return `
       <div class="pcard">
-        <h2>${t('medInfo')}</h2>
-        <dl>
-          <dt>${icon('alert')}${t('allergies')}</dt><dd>${p.allergies}</dd>
-          <dt>${icon('heart')}${t('conditions')}</dt><dd>${p.conditions}</dd>
-          <dt>${icon('pill')}${t('medications')}</dt><dd>${p.medications}</dd>
-        </dl>
-      </div>
-      <div class="pcard">
-        <h2>${t('contact')}</h2>
-        <a class="contact" href="tel:${p.contact.replace(/\s/g, '')}">${icon('phone')}<span>${p.contact}</span></a>
-      </div>
+        <h2>${t('welcomeAuth')}</h2>
+        <p class="meta">${t('authIntro')}</p>
+        <div class="seg" role="group">
+          <button type="button" data-action="authmode" data-mode="signin" aria-pressed="${!up}">${t('signInBtn')}</button>
+          <button type="button" data-action="authmode" data-mode="signup" aria-pressed="${up}">${t('createAcct')}</button>
+        </div>
+        <form data-auth novalidate>
+          <div class="fld"><label for="a_email">${t('email')}</label>
+            <input id="a_email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" required></div>
+          <div class="fld"><label for="a_pw">${t('password')}</label>
+            <input id="a_pw" name="password" type="password" autocomplete="${up ? 'new-password' : 'current-password'}" minlength="6" required></div>
+          <p id="autherr" class="err" role="alert" hidden></p>
+          <button class="bigbtn" type="submit">${up ? t('createAcct') : t('signInBtn')}</button>
+        </form>
+        ${up ? '' : `<button type="button" class="linkbtn" data-action="forgot">${t('forgot')}</button>`}
+        <p class="hint">${t('passHint')}</p>
+      </div>`;
+  }
+
+  const chip = (on) => `<span class="chip ${on ? 'on' : ''}">${on ? t('sharedChip') : t('privateChip')}</span>`;
+
+  function profileCards(p, email, offlineCopy) {
+    const sh = p.share || {};
+    const val = (k) => (p[k] ? esc(p[k]) : `<em class="none">${t('noInfo')}</em>`);
+    return `
+      <div class="pcard head"><span class="avatar">${esc(initials(p.name))}</span>
+        <div><strong class="pname">${esc(p.name || '')}</strong>
+        <span class="pmeta">${p.age != null && p.age !== '' ? esc(p.age) + ' &middot; ' : ''}${t('bloodGroup')}</span>
+        <span class="blood">${icon('drop')}${p.blood ? esc(p.blood) : '-'}</span></div></div>
+      ${offlineCopy ? `<p class="notice info">${t('offlineCopy')}</p>` : ''}
+      <div class="pcard"><h2>${t('medInfo')}</h2>
+        <dl class="med">
+          <dt>${icon('alert')}${t('allergies')}</dt><dd>${val('allergies')}${chip(sh.allergies)}</dd>
+          <dt>${icon('heart')}${t('conditions')}</dt><dd>${val('conditions')}${chip(sh.conditions)}</dd>
+          <dt>${icon('pill')}${t('medications')}</dt><dd>${val('medications')}${chip(sh.medications)}</dd>
+          <dt>${icon('drop')}${t('bloodGroup')}</dt><dd>${val('blood')}${chip(sh.blood)}</dd>
+        </dl></div>
+      <div class="pcard"><h2>${t('contact')}</h2>
+        ${p.contactPhone
+          ? `<a class="contact" href="tel:${esc(String(p.contactPhone).replace(/\s/g, ''))}">${icon('phone')}<span>${esc(p.contactName || '')} ${esc(p.contactPhone)}</span></a>`
+          : `<em class="none">${t('noInfo')}</em>`}
+        ${chip(sh.contactPhone)}</div>
       <button type="button" class="bigbtn" disabled>${icon('qr')}<span>${t('genQR')}</span></button>
       <p class="hint">${t('genSoon')}</p>
-      <div class="pcard">
-        <h2>${t('account')}</h2>
-        <p class="meta">${t('signIn')}. ${t('signInSoon')}.</p>
-        <h2 class="sp">${t('language')}</h2>
+      <div class="pcard"><h2>${t('account')}</h2>
+        <p class="meta">${t('signedInAs')} <strong>${esc(email || '')}</strong></p>
         ${langButtons()}
-      </div>`;
+        <button type="button" class="secbtn" data-action="signout">${t('signOut')}</button></div>`;
+  }
+
+  async function profileView() {
+    // Firebase could not load (no internet): show offline copy if we have one
+    if (fbState === 'failed') {
+      const c = cacheGet();
+      if (c && c.profile) return profileCards(c.profile, c.email, true) + '';
+      return `<p class="notice info">${t('needInternet')}</p>` + (await sampleBlock());
+    }
+    if (fbState === 'loading' || user === undefined) return `<p class="empty">${t('loading')}</p>`;
+
+    if (!user) return authCard() + (await sampleBlock());
+
+    let p = null, offline = false;
+    try {
+      p = await window.FB.getProfile(user.uid);
+      if (p) cacheSet(user.uid, user.email, p);
+    } catch (e) {
+      const c = cacheGet();
+      if (c && c.uid === user.uid) { p = c.profile; offline = true; }
+    }
+    if (!p) {
+      return `
+        <div class="pcard"><h2>${t('createProfileTitle')}</h2>
+          <p class="meta">${t('createProfileText')}</p>
+          <a class="bigbtn link" href="#/profile-edit">${t('createProfileBtn')}</a></div>
+        <div class="pcard"><h2>${t('account')}</h2>
+          <p class="meta">${t('signedInAs')} <strong>${esc(user.email || '')}</strong></p>
+          ${langButtons()}
+          <button type="button" class="secbtn" data-action="signout">${t('signOut')}</button></div>`;
+    }
+    return profileCards(p, user.email, offline);
+  }
+
+  async function profileEditView() {
+    if (fbState !== 'ready' || user === undefined) return `<p class="empty">${t(fbState === 'failed' ? 'needInternet' : 'loading')}</p>`;
+    if (!user) { location.hash = '#/profile'; return ''; }
+    let p = null;
+    try { p = await window.FB.getProfile(user.uid); } catch (e) { const c = cacheGet(); if (c && c.uid === user.uid) p = c.profile; }
+    const has = !!p;
+    p = p || {};
+    const sh = p.share || {};
+    const control = (f) => {
+      const v = p[f.k] != null ? p[f.k] : '';
+      const id = 'f_' + f.k;
+      if (f.type === 'select')
+        return `<select id="${id}" name="${f.k}">${BLOODS.map((b) => `<option value="${b}" ${b === v ? 'selected' : ''}>${b || t('bloodSelect')}</option>`).join('')}</select>`;
+      if (f.type === 'textarea') return `<textarea id="${id}" name="${f.k}" rows="2" maxlength="${f.max}">${esc(v)}</textarea>`;
+      if (f.type === 'number') return `<input id="${id}" name="${f.k}" type="number" inputmode="numeric" min="0" max="120" value="${esc(v)}">`;
+      return `<input id="${id}" name="${f.k}" type="${f.type}" maxlength="${f.max}" value="${esc(v)}" ${f.type === 'tel' ? 'inputmode="tel"' : ''}>`;
+    };
+    return `
+      <form data-pform novalidate>
+        ${FIELDS.map((f) => `
+          <div class="fld"><label for="f_${f.k}">${t(f.label)}</label>${control(f)}
+            <label class="shr"><input type="checkbox" name="s_${f.k}" ${has ? (sh[f.k] ? 'checked' : '') : 'checked'}><span>${t('shareWith')}</span></label>
+          </div>`).join('')}
+        <label class="shr consent"><input type="checkbox" name="consent" ${has ? 'checked' : ''}><span>${t('consentText')}</span></label>
+        <p id="perr" class="err" role="alert" hidden></p>
+        <button class="bigbtn" type="submit">${t('save')}</button>
+        <a class="secbtn" href="#/profile">${t('cancel')}</a>
+      </form>`;
+  }
+
+  async function doAuth(f) {
+    const err = document.getElementById('autherr');
+    const show = (m) => { err.textContent = m; err.className = 'err'; err.hidden = false; };
+    err.hidden = true;
+    const email = f.elements.email.value.trim(), pw = f.elements.password.value;
+    if (!window.FB) return show(t('errNet'));
+    if (!email || !pw) return show(t('errFill'));
+    const btn = f.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try { if (authMode === 'signup') await window.FB.signUp(email, pw); else await window.FB.signIn(email, pw); }
+    catch (ex) { show(authErr(ex)); btn.disabled = false; }
+  }
+
+  async function doForgot() {
+    const f = document.querySelector('[data-auth]');
+    const err = document.getElementById('autherr');
+    if (!f || !err) return;
+    const em = f.elements.email.value.trim();
+    const show = (m, ok) => { err.textContent = m; err.className = ok ? 'err ok' : 'err'; err.hidden = false; };
+    if (!em) return show(t('errFillEmail'));
+    if (!window.FB) return show(t('errNet'));
+    try { await window.FB.reset(em); show(t('resetSent'), true); } catch (ex) { show(authErr(ex)); }
+  }
+
+  async function doSaveProfile(f) {
+    const err = document.getElementById('perr');
+    const show = (m) => { err.textContent = m; err.hidden = false; err.scrollIntoView({ block: 'center' }); };
+    err.hidden = true;
+    const el = f.elements;
+    const data = { share: {} };
+    FIELDS.forEach((fl) => { data[fl.k] = (el[fl.k].value || '').trim(); data.share[fl.k] = !!el['s_' + fl.k].checked; });
+    if (!data.name) return show(t('nameNeeded'));
+    if (data.age === '') data.age = null;
+    else { const n = Number(data.age); if (!(n >= 0 && n <= 120)) return show(t('ageBad')); data.age = Math.round(n); }
+    if (!el.consent.checked) return show(t('consentNeeded'));
+    const btn = f.querySelector('button[type=submit]');
+    btn.disabled = true; btn.textContent = t('saving');
+    try {
+      await window.FB.saveProfile(user.uid, data);
+      cacheSet(user.uid, user.email, data);
+      location.hash = '#/profile';
+    } catch (ex) {
+      show(t('saveFail')); btn.disabled = false; btn.textContent = t('save');
+    }
   }
 
   async function offlineView() {
@@ -335,6 +518,7 @@
       case 'scan': html = await scanView(); break;
       case 'profile':
       case 'emergency-profile': html = await profileView(); break;
+      case 'profile-edit': html = await profileEditView(); break;
       case 'offline': html = await offlineView(); break;
       case 'updates': html = await updatesView(); break;
       default: html = notFoundView();
@@ -359,6 +543,9 @@
       if (a === 'menu') openDrawer();
       else if (a === 'close') closeDrawer();
       else if (a === 'read') readGuide();
+      else if (a === 'authmode') { authMode = act.getAttribute('data-mode'); render(); }
+      else if (a === 'forgot') doForgot();
+      else if (a === 'signout') { if (window.FB) await window.FB.signOut(); else { try { localStorage.removeItem('fl_pcache'); } catch (e) {} render(); } }
       else if (a === 'install' && installEvent) {
         installEvent.prompt();
         installEvent.userChoice.finally(() => { installEvent = null; closeDrawer(); });
@@ -375,12 +562,14 @@
     }
   });
 
-  document.addEventListener('submit', (e) => {
-    const f = e.target.closest('[data-search]');
-    if (!f) return;
-    e.preventDefault();
-    const q = f.querySelector('input').value.trim();
-    location.hash = q ? '#/search/' + encodeURIComponent(q) : '#/library';
+  document.addEventListener('submit', async (e) => {
+    const f = e.target;
+    if (f.matches('[data-search]')) {
+      e.preventDefault();
+      const q = f.querySelector('input').value.trim();
+      location.hash = q ? '#/search/' + encodeURIComponent(q) : '#/library';
+    } else if (f.matches('[data-auth]')) { e.preventDefault(); doAuth(f); }
+    else if (f.matches('[data-pform]')) { e.preventDefault(); doSaveProfile(f); }
   });
 
   // live filtering while typing on the guides page
@@ -390,6 +579,19 @@
     const box = document.getElementById('glist');
     if (box) box.innerHTML = guideRows(guides, e.target.value.trim());
   });
+
+  const onProfileRoute = () => /^#\/(profile|emergency-profile|profile-edit)?$/.test(location.hash) && location.hash !== '' && location.hash !== '#/';
+  function startFirebase() {
+    fbState = 'ready';
+    window.FB.onAuth((u) => {
+      user = u || null;
+      if (!u) { try { localStorage.removeItem('fl_pcache'); } catch (e) {} }
+      if (onProfileRoute()) render();
+    });
+  }
+  window.addEventListener('fb-ready', startFirebase);
+  window.addEventListener('fb-failed', () => { fbState = 'failed'; if (onProfileRoute()) render(); });
+  if (window.FB) startFirebase();
 
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !drawer.hidden) closeDrawer(); });
   window.addEventListener('hashchange', render);
