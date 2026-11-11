@@ -1,10 +1,10 @@
 // Service worker: lets the app open without internet.
 // Network first (so updates show up), saved copy as backup.
 // Change the number in CACHE (v2 -> v3) to force every phone to refresh.
-const CACHE = 'fatal-links-v3';
+const CACHE = 'fatal-links-v4';
 const FILES = [
   './', './index.html', './styles.css', './app.js', './data.js', './i18n.js',
-  './firebase.js', './manifest.json', './logo.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'
+  './firebase.js', './qr.js', './manifest.json', './logo.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'
 ];
 
 self.addEventListener('install', (e) => {

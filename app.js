@@ -12,6 +12,9 @@
   let user;                 // undefined = still checking, null = signed out, object = signed in
   let fbState = 'loading';  // loading | ready | failed
   let authMode = 'signin';
+  let viewProfile = null;   // profile being shown on the Profile page
+  let editToken = null;     // QR code of the profile being edited
+  let scanStream = null, scanTimer = null;
 
   /* ---------- helpers ---------- */
   const t = (k) => (I18N[lang] && I18N[lang][k]) || I18N.en[k] || k;
@@ -73,7 +76,8 @@
     'emergency-profile': { title: 'epTitle', back: '#/', edit: true },
     'profile-edit': { title: 'epEditTitle', back: '#/profile' },
     offline: { title: 'offTitle', back: '#/' },
-    updates: { title: 'updatesTitle', back: '#/' }
+    updates: { title: 'updatesTitle', back: '#/' },
+    e: { title: 'emgTitle', back: '#/' }
   };
 
   function renderChrome(name) {
@@ -112,6 +116,7 @@
       ['profile', '#/profile', 'user', 'navProfile'],
       ['offline', '#/offline', 'download', 'navOffline']
     ];
+    nav.style.display = name === 'e' ? 'none' : '';
     nav.innerHTML = items
       .map(([key, href, ic, label]) =>
         `<a href="${href}" ${key === active ? 'aria-current="page"' : ''}>${icon(ic)}<span>${t(label)}</span></a>`)
@@ -218,16 +223,6 @@
       ${sosBar()}`;
   }
 
-  async function scanView() {
-    return `
-      <div class="scanbox">
-        <div class="frame"><i></i><i></i><i></i><i></i>${icon('qr', 'scan-ic')}</div>
-        <p class="scan-t">${t('scanHint')}</p>
-      </div>
-      <p class="notice info">${t('scanSoon')}</p>`;
-  }
-
-  /* ---------- sign-in + emergency profile ---------- */
   const FIELDS = [
     { k: 'name', label: 'fullName', type: 'text', max: 80 },
     { k: 'age', label: 'age', type: 'number' },
@@ -320,8 +315,7 @@
           ? `<a class="contact" href="tel:${esc(String(p.contactPhone).replace(/\s/g, ''))}">${icon('phone')}<span>${esc(p.contactName || '')} ${esc(p.contactPhone)}</span></a>`
           : `<em class="none">${t('noInfo')}</em>`}
         ${chip(sh.contactPhone)}</div>
-      <button type="button" class="bigbtn" disabled>${icon('qr')}<span>${t('genQR')}</span></button>
-      <p class="hint">${t('genSoon')}</p>
+      ${qrCard(p, offlineCopy)}
       <div class="pcard"><h2>${t('account')}</h2>
         <p class="meta">${t('signedInAs')} <strong>${esc(email || '')}</strong></p>
         ${langButtons()}
@@ -332,7 +326,7 @@
     // Firebase could not load (no internet): show offline copy if we have one
     if (fbState === 'failed') {
       const c = cacheGet();
-      if (c && c.profile) return profileCards(c.profile, c.email, true) + '';
+      if (c && c.profile) { viewProfile = c.profile; return profileCards(c.profile, c.email, true); }
       return `<p class="notice info">${t('needInternet')}</p>` + (await sampleBlock());
     }
     if (fbState === 'loading' || user === undefined) return `<p class="empty">${t('loading')}</p>`;
@@ -357,6 +351,7 @@
           ${langButtons()}
           <button type="button" class="secbtn" data-action="signout">${t('signOut')}</button></div>`;
     }
+    viewProfile = p;
     return profileCards(p, user.email, offline);
   }
 
@@ -367,6 +362,7 @@
     try { p = await window.FB.getProfile(user.uid); } catch (e) { const c = cacheGet(); if (c && c.uid === user.uid) p = c.profile; }
     const has = !!p;
     p = p || {};
+    editToken = p.qrToken || null;
     const sh = p.share || {};
     const control = (f) => {
       const v = p[f.k] != null ? p[f.k] : '';
@@ -388,6 +384,168 @@
         <button class="bigbtn" type="submit">${t('save')}</button>
         <a class="secbtn" href="#/profile">${t('cancel')}</a>
       </form>`;
+  }
+
+  /* ---------- wristband QR code, emergency page, scanner ---------- */
+  const routeName = () => location.hash.replace(/^#\/?/, '').split('/')[0] || 'home';
+  const baseUrl = () => location.origin + location.pathname.replace(/index\.html$/, '');
+  const emergencyUrl = (tok) => baseUrl() + '#/e/' + tok;
+  const tokenFrom = (s) => { const m = /#\/e\/([A-Za-z0-9_-]{16,64})/.exec(s || ''); return m ? m[1] : null; };
+  const newToken = () => {
+    const a = new Uint8Array(16);
+    crypto.getRandomValues(a);
+    return btoa(String.fromCharCode.apply(null, a)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+  // Only the details the person switched on go into the public page.
+  const publicFrom = (p) => {
+    const o = {};
+    FIELDS.forEach((f) => { if (p.share && p.share[f.k] && p[f.k] !== '' && p[f.k] != null) o[f.k] = p[f.k]; });
+    return o;
+  };
+
+  function qrSvg(text) {
+    const m = QR.encode(text), n = m.length, q = 4, s = n + 2 * q;
+    let d = '';
+    m.forEach((row, y) => row.forEach((c, x) => { if (c) d += 'M' + (x + q) + ' ' + (y + q) + 'h1v1h-1z'; }));
+    return `<svg class="qrsvg" viewBox="0 0 ${s} ${s}" shape-rendering="crispEdges" role="img" aria-label="QR code"><rect width="${s}" height="${s}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+  }
+
+  function downloadQr(url) {
+    const m = QR.encode(url), n = m.length, q = 4;
+    const cell = Math.max(8, Math.floor(640 / (n + 2 * q))), side = (n + 2 * q) * cell;
+    const c = document.createElement('canvas');
+    c.width = side; c.height = side + 150;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = '#000';
+    m.forEach((row, y) => row.forEach((v, x) => { if (v) g.fillRect((x + q) * cell, (y + q) * cell, cell, cell); }));
+    g.textAlign = 'center';
+    g.fillStyle = '#0E2A80'; g.font = 'bold 44px sans-serif'; g.fillText('FATAL LINKS', side / 2, side + 55);
+    g.fillStyle = '#333'; g.font = '28px sans-serif'; g.fillText('Scan for emergency info', side / 2, side + 105);
+    c.toBlob((blob) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'fatal-links-wristband-qr.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }, 'image/png');
+  }
+
+  function printSheet(url) {
+    const label = `<div class="plabel">${qrSvg(url)}<strong>FATAL LINKS</strong><span>Scan for emergency info</span></div>`;
+    $('printsheet').innerHTML = label.repeat(6);
+    window.print();
+  }
+
+  function qrCard(p, offline) {
+    const tok = p.qrToken;
+    if (!tok) {
+      if (offline) return '';
+      return `<div class="pcard"><h2>${t('qrTitle')}</h2><p class="meta">${t('qrIntro')}</p>
+        <button type="button" class="bigbtn" data-action="qrgen">${icon('qr')}<span>${t('genQR')}</span></button></div>`;
+    }
+    return `<div class="pcard qrcard"><h2>${t('qrTitle')}</h2>
+      <div class="qrbox">${qrSvg(emergencyUrl(tok))}</div>
+      <p class="meta center">${t('qrHelp')}</p>
+      <button type="button" class="bigbtn" data-action="qrdl">${icon('download')}<span>${t('qrDownload')}</span></button>
+      <button type="button" class="secbtn" data-action="qrprint">${t('qrPrint')}</button>
+      <a class="secbtn" href="#/e/${esc(tok)}">${t('qrPreview')}</a>
+      ${offline ? '' : `<button type="button" class="secbtn" data-action="qrnew">${t('qrNew')}</button>
+      <button type="button" class="linkbtn" data-action="qroff">${t('qrOff')}</button>`}
+      <p class="hint">${t('qrEditHint')}</p></div>`;
+  }
+
+  async function qrAction(a) {
+    if (!viewProfile || !user || !window.FB) return;
+    try {
+      if (a === 'qrgen' || a === 'qrnew') {
+        if (a === 'qrnew' && !confirm(t('qrNewConfirm'))) return;
+        const tok = newToken();
+        await window.FB.publishQr(user.uid, tok, viewProfile.qrToken || null, publicFrom(viewProfile));
+        viewProfile.qrToken = tok;
+      } else if (a === 'qroff') {
+        if (!confirm(t('qrOffConfirm'))) return;
+        await window.FB.disableQr(user.uid, viewProfile.qrToken || null);
+        viewProfile.qrToken = null;
+      }
+      cacheSet(user.uid, user.email, viewProfile);
+      render();
+    } catch (e) { alert(t('saveFail')); }
+  }
+
+  async function emergencyView(token) {
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(token || '')) return inactiveView();
+    if (fbState === 'loading') return `<p class="empty">${t('loading')}</p>`;
+    if (fbState === 'failed' || !window.FB) return `<p class="notice info">${t('needInternet')}</p>${sosBar()}`;
+    let d;
+    try { d = await window.FB.getPublic(token); } catch (e) { return `<p class="notice info">${t('needInternet')}</p>${sosBar()}`; }
+    if (!d) return inactiveView();
+    const row = (ic, label, v, cls) => v ? `<div class="pcard ${cls || ''}"><h2>${icon(ic)}${t(label)}</h2><p class="big-v">${esc(v)}</p></div>` : '';
+    const any = ['age', 'blood', 'allergies', 'conditions', 'medications', 'contactPhone'].some((k) => d[k] !== undefined && d[k] !== '');
+    let when = '';
+    try { if (d.updatedAt && d.updatedAt.toDate) when = d.updatedAt.toDate().toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }); } catch (e) {}
+    return `
+      <p class="notice">${t('emgNote')}</p>
+      ${sosBar()}
+      <div class="pcard head"><span class="avatar">${esc(initials(d.name))}</span>
+        <div><strong class="pname">${esc(d.name || '')}</strong>
+        ${d.age != null && d.age !== '' ? `<span class="pmeta">${esc(d.age)}</span>` : ''}
+        ${d.blood ? `<span class="blood">${icon('drop')}${esc(d.blood)}</span>` : ''}</div></div>
+      ${any ? '' : `<p class="empty">${t('emgNone')}</p>`}
+      ${row('alert', 'allergies', d.allergies, 'danger')}
+      ${row('heart', 'conditions', d.conditions)}
+      ${row('pill', 'medications', d.medications)}
+      ${d.contactPhone ? `<a class="bigbtn callbtn" href="tel:${esc(String(d.contactPhone).replace(/[^+\d]/g, ''))}">${icon('phone')}<span>${t('callContact')} ${esc(d.contactName || '')} ${esc(d.contactPhone)}</span></a>` : ''}
+      ${when ? `<p class="source">${t('lastUpdated')} ${when}</p>` : ''}`;
+  }
+
+  function inactiveView() {
+    return `<div class="ph"><h2>${t('qrInactive')}</h2><p>${t('qrInactiveText')}</p></div>${sosBar()}`;
+  }
+
+  /* camera scanner (uses the phone's built-in QR detector where available) */
+  function stopScan() {
+    if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+    if (scanStream) { scanStream.getTracks().forEach((tr) => tr.stop()); scanStream = null; }
+  }
+
+  async function scanView() {
+    return `
+      <div class="scanbox">
+        <div class="frame" id="scanframe"><i></i><i></i><i></i><i></i>
+          <video id="scanvideo" playsinline muted hidden></video>${icon('qr', 'scan-ic')}</div>
+        <p class="scan-t">${t('scanHint')}</p>
+        <button type="button" class="bigbtn light" data-action="scanstart">${icon('qr')}<span>${t('scanStart')}</span></button>
+      </div>
+      <p id="scanmsg" class="notice info" hidden></p>
+      <p class="hint">${t('scanOr')}</p>`;
+  }
+
+  async function startScan() {
+    const msg = $('scanmsg');
+    const show = (m) => { msg.textContent = m; msg.hidden = false; };
+    msg.hidden = true;
+    if (!('BarcodeDetector' in window)) return show(t('scanNoSupport'));
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return show(t('scanNoCamera'));
+    let det;
+    try { det = new window.BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { return show(t('scanNoSupport')); }
+    stopScan();
+    try { scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
+    catch (e) { return show(t('scanDenied')); }
+    const v = $('scanvideo');
+    v.srcObject = scanStream; v.hidden = false;
+    $('scanframe').classList.add('live');
+    const pl = v.play(); if (pl && pl.catch) pl.catch(() => {});
+    scanTimer = setInterval(async () => {
+      try {
+        const codes = await det.detect(v);
+        for (const c of codes) {
+          const tok = tokenFrom(c.rawValue);
+          if (tok) { stopScan(); location.hash = '#/e/' + tok; return; }
+          show(t('scanNotOurs'));
+        }
+      } catch (e) {}
+    }, 300);
   }
 
   async function doAuth(f) {
@@ -428,8 +586,8 @@
     const btn = f.querySelector('button[type=submit]');
     btn.disabled = true; btn.textContent = t('saving');
     try {
-      await window.FB.saveProfile(user.uid, data);
-      cacheSet(user.uid, user.email, data);
+      await window.FB.saveProfile(user.uid, data, editToken, publicFrom(data));
+      cacheSet(user.uid, user.email, Object.assign({}, data, { qrToken: editToken }));
       location.hash = '#/profile';
     } catch (ex) {
       show(t('saveFail')); btn.disabled = false; btn.textContent = t('save');
@@ -504,6 +662,7 @@
   /* ---------- router ---------- */
   async function render() {
     stopSpeech();
+    stopScan();
     closeDrawer();
     const parts = location.hash.replace(/^#\/?/, '').split('/');
     const name = parts[0] || 'home';
@@ -516,6 +675,7 @@
       case 'search': html = await libraryView(arg); break;
       case 'guide': html = await guideView(arg); break;
       case 'scan': html = await scanView(); break;
+      case 'e': html = await emergencyView(arg); break;
       case 'profile':
       case 'emergency-profile': html = await profileView(); break;
       case 'profile-edit': html = await profileEditView(); break;
@@ -545,6 +705,10 @@
       else if (a === 'read') readGuide();
       else if (a === 'authmode') { authMode = act.getAttribute('data-mode'); render(); }
       else if (a === 'forgot') doForgot();
+      else if (a === 'scanstart') startScan();
+      else if (a === 'qrgen' || a === 'qrnew' || a === 'qroff') qrAction(a);
+      else if (a === 'qrdl' && viewProfile && viewProfile.qrToken) downloadQr(emergencyUrl(viewProfile.qrToken));
+      else if (a === 'qrprint' && viewProfile && viewProfile.qrToken) printSheet(emergencyUrl(viewProfile.qrToken));
       else if (a === 'signout') { if (window.FB) await window.FB.signOut(); else { try { localStorage.removeItem('fl_pcache'); } catch (e) {} render(); } }
       else if (a === 'install' && installEvent) {
         installEvent.prompt();
@@ -580,17 +744,18 @@
     if (box) box.innerHTML = guideRows(guides, e.target.value.trim());
   });
 
-  const onProfileRoute = () => /^#\/(profile|emergency-profile|profile-edit)?$/.test(location.hash) && location.hash !== '' && location.hash !== '#/';
+  const PROFILE_ROUTES = ['profile', 'emergency-profile', 'profile-edit'];
   function startFirebase() {
     fbState = 'ready';
     window.FB.onAuth((u) => {
       user = u || null;
       if (!u) { try { localStorage.removeItem('fl_pcache'); } catch (e) {} }
-      if (onProfileRoute()) render();
+      if (PROFILE_ROUTES.includes(routeName())) render();
     });
+    if (routeName() === 'e') render();
   }
   window.addEventListener('fb-ready', startFirebase);
-  window.addEventListener('fb-failed', () => { fbState = 'failed'; if (onProfileRoute()) render(); });
+  window.addEventListener('fb-failed', () => { fbState = 'failed'; if (PROFILE_ROUTES.concat('e').includes(routeName())) render(); });
   if (window.FB) startFirebase();
 
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !drawer.hidden) closeDrawer(); });

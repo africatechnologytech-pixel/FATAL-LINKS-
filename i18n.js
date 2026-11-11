@@ -74,6 +74,27 @@ const I18N = {
     errOp: 'Email sign-in is not switched on in Firebase.', errGeneric: 'Something went wrong.',
     errFill: 'Enter your email and password.', errFillEmail: 'Enter your email above first.',
     resetSent: 'If an account exists for that email, a reset link has been sent. Check your spam folder too.',
+    qrTitle: 'Wristband QR code',
+    qrIntro: 'Make a QR code for your wristband. Anyone who scans it can see the details you marked as shared. They do not need the app.',
+    qrHelp: 'Anyone who scans this code sees only the details marked Shared. No app needed.',
+    qrDownload: 'Save QR image', qrPrint: 'Print or save as PDF', qrPreview: 'See what a scanner sees',
+    qrNew: 'Make a new code', qrOff: 'Switch off this QR code',
+    qrNewConfirm: 'Make a new QR code? The old one, and any wristband using it, will stop working.',
+    qrOffConfirm: 'Switch off this QR code? Scanning it will show nothing.',
+    qrEditHint: 'To change what scanners see, edit your profile. The QR page updates automatically.',
+    qrLabel: 'Scan for emergency info',
+    emgTitle: 'Emergency Information',
+    emgNote: 'Shared by the wearer. This is not a verified medical record. In an emergency, call 112 first.',
+    emgNone: 'The wearer has not chosen to share any details.',
+    qrInactive: 'This code is not active',
+    qrInactiveText: 'The wristband may be old, switched off or replaced. If someone needs help, call 112.',
+    callContact: 'Call', lastUpdated: 'Last updated',
+    scanStart: 'Start camera',
+    scanNoSupport: 'Live scanning is not supported in this browser. Open your phone\'s camera app and point it at the wristband QR code instead.',
+    scanNoCamera: 'Camera is not available on this device.',
+    scanDenied: 'Camera permission was denied. Allow camera access and try again.',
+    scanNotOurs: 'That QR code is not a FATAL LINKS wristband.',
+    scanOr: 'You can also open your phone\'s camera app and point it at the wristband.',
     notFound: 'Page not found', notFoundText: 'That page does not exist.', goHome: 'Go to Home'
   },
 
@@ -110,6 +131,7 @@ const I18N = {
     installApp: 'Tinye ngwa a n\'ekwentị',
     signInBtn: 'Banye', createAcct: 'Mepụta akaụntụ', email: 'Email', password: 'Paswọdụ',
     save: 'Chekwa', cancel: 'Kagbuo', fullName: 'Aha zuru ezu', age: 'Afọ',
+    qrTitle: 'QR Koodu Mgbaaka Aka', scanStart: 'Malite igwefoto', emgTitle: 'Ozi Mberede',
     goHome: 'Gaa n\'Ụlọ'
   }
 };
