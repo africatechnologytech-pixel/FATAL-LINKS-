@@ -1,6 +1,6 @@
 // Connects the app to Firebase (sign-in + database).
 // This config is NOT a secret: it only says which project to talk to.
-// Your data is protected by the security rules (see firestore.rules).
+// Your data is protected by the security rules in Firebase (Firestore > Rules).
 //
 // If Firebase cannot load (for example no internet), the rest of the app still works.
 const FIREBASE_CONFIG = {
@@ -23,43 +23,83 @@ const SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
     ]);
     const app = appMod.initializeApp(FIREBASE_CONFIG);
     const auth = authMod.getAuth(app);
-    const db = fsMod.getFirestore(app);
+
+    // Keep a copy of everything read, so content already seen also opens without internet.
+    let db;
+    try {
+      db = fsMod.initializeFirestore(app, {
+        localCache: fsMod.persistentLocalCache({ tabManager: fsMod.persistentMultipleTabManager() })
+      });
+    } catch (e) {
+      db = fsMod.getFirestore(app);
+    }
+
+    const D = (path, id) => fsMod.doc(db, path, id);
+    const listAll = async (name) => {
+      const snap = await fsMod.getDocs(fsMod.collection(db, name));
+      return snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+    };
 
     window.FB = {
+      /* --- sign-in --- */
       onAuth: (cb) => authMod.onAuthStateChanged(auth, cb),
       signUp: (email, pw) => authMod.createUserWithEmailAndPassword(auth, email, pw),
       signIn: (email, pw) => authMod.signInWithEmailAndPassword(auth, email, pw),
       signOut: () => authMod.signOut(auth),
       reset: (email) => authMod.sendPasswordResetEmail(auth, email),
+
+      /* --- private profile + wristband QR --- */
       async getProfile(uid) {
-        const snap = await fsMod.getDoc(fsMod.doc(db, 'users', uid));
+        const snap = await fsMod.getDoc(D('users', uid));
         return snap.exists() ? snap.data() : null;
       },
-      // Saves the private profile. If the person has a QR code, the public copy is updated in the same step.
       async saveProfile(uid, data, token, pub) {
         const b = fsMod.writeBatch(db);
-        b.set(fsMod.doc(db, 'users', uid), { ...data, updatedAt: fsMod.serverTimestamp() }, { merge: true });
-        if (token) b.set(fsMod.doc(db, 'publicProfiles', token), { ...pub, ownerUid: uid, updatedAt: fsMod.serverTimestamp() });
+        b.set(D('users', uid), { ...data, updatedAt: fsMod.serverTimestamp() }, { merge: true });
+        if (token) b.set(D('publicProfiles', token), { ...pub, ownerUid: uid, updatedAt: fsMod.serverTimestamp() });
         await b.commit();
       },
-      // Reads one public emergency page by its random code (no sign-in needed).
       async getPublic(token) {
-        const snap = await fsMod.getDoc(fsMod.doc(db, 'publicProfiles', token));
+        const snap = await fsMod.getDoc(D('publicProfiles', token));
         return snap.exists() ? snap.data() : null;
       },
-      // Creates a new QR code and removes the old one in one step.
       async publishQr(uid, token, oldToken, pub) {
         const b = fsMod.writeBatch(db);
-        b.set(fsMod.doc(db, 'publicProfiles', token), { ...pub, ownerUid: uid, updatedAt: fsMod.serverTimestamp() });
-        b.set(fsMod.doc(db, 'users', uid), { qrToken: token }, { merge: true });
-        if (oldToken && oldToken !== token) b.delete(fsMod.doc(db, 'publicProfiles', oldToken));
+        b.set(D('publicProfiles', token), { ...pub, ownerUid: uid, updatedAt: fsMod.serverTimestamp() });
+        b.set(D('users', uid), { qrToken: token }, { merge: true });
+        if (oldToken && oldToken !== token) b.delete(D('publicProfiles', oldToken));
         await b.commit();
       },
-      // Switches the QR code off.
       async disableQr(uid, oldToken) {
         const b = fsMod.writeBatch(db);
-        if (oldToken) b.delete(fsMod.doc(db, 'publicProfiles', oldToken));
-        b.set(fsMod.doc(db, 'users', uid), { qrToken: null }, { merge: true });
+        if (oldToken) b.delete(D('publicProfiles', oldToken));
+        b.set(D('users', uid), { qrToken: null }, { merge: true });
+        await b.commit();
+      },
+
+      /* --- content everyone can read --- */
+      listGuides: () => listAll('guides'),
+      listUpdates: () => listAll('updates'),
+      async getImage(id) {
+        const snap = await fsMod.getDoc(D('images', id));
+        return snap.exists() ? snap.data().data : null;
+      },
+
+      /* --- admin only (the security rules enforce this) --- */
+      async isAdmin(uid) {
+        const snap = await fsMod.getDoc(D('admins', uid));
+        return snap.exists();
+      },
+      saveGuide: (id, data) => fsMod.setDoc(D('guides', id), data),
+      deleteGuide: (id) => fsMod.deleteDoc(D('guides', id)),
+      saveUpdate: (id, data) => fsMod.setDoc(D('updates', id), data),
+      deleteUpdate: (id) => fsMod.deleteDoc(D('updates', id)),
+      saveImage: (id, dataUrl) => fsMod.setDoc(D('images', id), { data: dataUrl, createdAt: fsMod.serverTimestamp() }),
+      deleteImage: (id) => fsMod.deleteDoc(D('images', id)),
+      async seed(guides, updates) {
+        const b = fsMod.writeBatch(db);
+        guides.forEach(([id, data]) => b.set(D('guides', id), data));
+        updates.forEach(([id, data]) => b.set(D('updates', id), data));
         await b.commit();
       }
     };

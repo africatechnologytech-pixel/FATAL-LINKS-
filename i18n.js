@@ -95,6 +95,8 @@ const I18N = {
     scanDenied: 'Camera permission was denied. Allow camera access and try again.',
     scanNotOurs: 'That QR code is not a FATAL LINKS wristband.',
     scanOr: 'You can also open your phone\'s camera app and point it at the wristband.',
+    adminTitle: 'Content Manager', adminLink: 'Content manager (admin)',
+    igPartial: 'Some steps are not yet in Igbo. Those show in English.',
     notFound: 'Page not found', notFoundText: 'That page does not exist.', goHome: 'Go to Home'
   },
 

@@ -1,8 +1,9 @@
-// Sample data + the ONLY place the app reads data from.
-// Later (Firebase step) we replace the bodies of DataService's methods with
-// Firestore calls. The screens in app.js will not need to change.
+// The ONLY place the app reads content from.
+// Real content lives in Firebase (edited in the Admin page). The sample guides below are:
+//   - shown when Firebase is empty or cannot be reached and nothing is saved on the phone yet
+//   - used by the Admin page's "Add the sample guides" button
 //
-// ALL CONTENT BELOW IS SAMPLE / DEMO. Not reviewed by a doctor.
+// ALL SAMPLE CONTENT IS DEMO. Not reviewed by a doctor.
 // A field like title: { en: '...', ig: '...' } holds one value per language.
 // If a language is missing, the app shows English.
 // "ill" picks the placeholder illustration (replace with reviewed images later).
@@ -155,9 +156,88 @@ const SAMPLE_PROFILE = {
   contact: '+234 801 234 5678'
 };
 
+
+/* ---------- reading content from Firebase (with a saved copy on the phone) ---------- */
+const fbReady = new Promise((res) => {
+  window.addEventListener('fb-ready', () => res(true));
+  window.addEventListener('fb-failed', () => res(false));
+  if (window.FB) res(true);
+});
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+async function fbAvailable() {
+  if (navigator.onLine === false) return false;
+  return Promise.race([fbReady, new Promise((r) => setTimeout(() => r(false), 5000))]);
+}
+
+// Turns a guide saved by the Admin page into the shape the screens use.
+function normGuide(id, d) {
+  const st = d.steps || [];
+  const en = st.map((s) => (s.text && s.text.en) || '');
+  const ig = st.map((s) => (s.text && s.text.ig) || '');
+  const hasIg = ig.some(Boolean);
+  const lines = (o) => ({ en: (o && o.en) || [], ig: o && o.ig && o.ig.length ? o.ig : undefined });
+  return {
+    id, ill: d.ill || 'books', order: d.order || 0,
+    title: d.title || {}, sub: d.sub || {}, summary: d.summary || {},
+    updated: d.updated || '', cover: d.cover || null, thumb: d.thumb || null,
+    steps: { en, ig: hasIg ? ig.map((x, i) => x || en[i]) : undefined },
+    igPartial: hasIg && ig.some((x) => !x),
+    stepImgs: st.map((s) => s.img || null),
+    callIf: lines(d.callIf), dont: lines(d.dont)
+  };
+}
+const normUpdate = (d) => ({ id: d.id, date: d.date || '', title: d.title || {}, body: d.body || {} });
+
+function makeStore(key, fetchFn, normFn, fallback, sortFn) {
+  let mem = null, inflight = null;
+  const readCache = () => { try { const c = JSON.parse(localStorage.getItem(key) || 'null'); return Array.isArray(c) && c.length ? c : null; } catch (e) { return null; } };
+  function refresh() {
+    if (inflight) return inflight;
+    inflight = (async () => {
+      let list = null, ok = false;
+      if (await fbAvailable()) {
+        try { const raw = await withTimeout(fetchFn(), 8000); ok = true; list = raw.map(normFn).sort(sortFn); } catch (e) {}
+      }
+      if (ok) {
+        try { if (list.length) localStorage.setItem(key, JSON.stringify(list)); else localStorage.removeItem(key); } catch (e) {}
+        if (!list.length) list = fallback;
+      } else list = readCache() || fallback;
+      const first = mem === null;
+      const changed = JSON.stringify(list) !== JSON.stringify(mem);
+      mem = list;
+      if (changed && !first) window.dispatchEvent(new Event('fl-data'));
+      return list;
+    })().finally(() => { inflight = null; });
+    return inflight;
+  }
+  return {
+    async get() {
+      if (mem) return mem;
+      const c = readCache();
+      if (c) { mem = c; refresh(); return c; }   // show the saved copy now, refresh quietly
+      return refresh();
+    },
+    invalidate() { mem = null; try { localStorage.removeItem(key); } catch (e) {} }
+  };
+}
+
+const guidesStore = makeStore('fl_gcache', () => window.FB.listGuides(), (d) => normGuide(d.id, d), SAMPLE_GUIDES, (a, b) => (a.order || 0) - (b.order || 0));
+const updatesStore = makeStore('fl_ucache', () => window.FB.listUpdates(), normUpdate, SAMPLE_UPDATES, (a, b) => String(b.date).localeCompare(String(a.date)));
+const imageMem = {};
+
 const DataService = {
-  async getGuides()   { return SAMPLE_GUIDES; },
-  async getGuide(id)  { return SAMPLE_GUIDES.find((g) => g.id === id) || null; },
-  async getUpdates()  { return SAMPLE_UPDATES; },
-  async getProfile()  { return SAMPLE_PROFILE; }
+  getGuides: () => guidesStore.get(),
+  async getGuide(id) { const l = await guidesStore.get(); return l.find((g) => g.id === id) || null; },
+  getUpdates: () => updatesStore.get(),
+  async getProfile() { return SAMPLE_PROFILE; },
+  async getImage(id) {
+    if (imageMem[id]) return imageMem[id];
+    if (!(await fbAvailable())) return null;
+    try {
+      const d = await withTimeout(window.FB.getImage(id), 8000);
+      if (typeof d === 'string' && d.indexOf('data:image/') === 0) { imageMem[id] = d; return d; }
+    } catch (e) {}
+    return null;
+  },
+  invalidate() { guidesStore.invalidate(); updatesStore.invalidate(); }
 };

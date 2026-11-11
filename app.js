@@ -18,7 +18,8 @@
 
   /* ---------- helpers ---------- */
   const t = (k) => (I18N[lang] && I18N[lang][k]) || I18N.en[k] || k;
-  const loc = (o) => (o && (o[lang] || o.en)) || '';
+  const locRaw = (o) => (o && (o[lang] || o.en)) || '';
+  const loc = (o) => esc(locRaw(o));   // safe to place inside page text
   const fmtDate = (d) =>
     new Date(d + 'T00:00:00').toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
   const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -77,7 +78,8 @@
     'profile-edit': { title: 'epEditTitle', back: '#/profile' },
     offline: { title: 'offTitle', back: '#/' },
     updates: { title: 'updatesTitle', back: '#/' },
-    e: { title: 'emgTitle', back: '#/' }
+    e: { title: 'emgTitle', back: '#/' },
+    admin: { title: 'adminTitle', back: '#/profile' }
   };
 
   function renderChrome(name) {
@@ -108,7 +110,7 @@
         </div>`;
     }
 
-    const active = { home: 'home', library: 'guides', search: 'guides', guide: 'guides', scan: 'scan', profile: 'profile', 'emergency-profile': 'profile', 'profile-edit': 'profile', offline: 'offline' }[name];
+    const active = { home: 'home', library: 'guides', search: 'guides', guide: 'guides', scan: 'scan', profile: 'profile', 'emergency-profile': 'profile', 'profile-edit': 'profile', admin: 'profile', offline: 'offline' }[name];
     const items = [
       ['home', '#/', 'home', 'navHome'],
       ['guides', '#/library', 'book', 'navGuides'],
@@ -154,16 +156,21 @@
 
   const matches = (g, q) => {
     if (!q) return true;
-    const hay = [loc(g.title), loc(g.sub), loc(g.summary), (g.steps[lang] || g.steps.en).join(' ')].join(' ').toLowerCase();
+    const hay = [locRaw(g.title), locRaw(g.sub), locRaw(g.summary), (g.steps[lang] || g.steps.en).join(' ')].join(' ').toLowerCase();
     return q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
   };
+
+  const thumbHtml = (g) =>
+    g.thumb && String(g.thumb).indexOf('data:image/') === 0
+      ? `<img src="${esc(g.thumb)}" alt="">`
+      : (ILL[g.ill] || ILL.books);
 
   const guideRows = (guides, q) => {
     const list = guides.filter((g) => matches(g, q));
     if (!list.length) return `<p class="empty">${t('noResults')}</p>`;
     return `<ul class="list">${list.map((g) => `
       <li><a class="row" href="#/guide/${g.id}">
-        <span class="thumb">${ILL[g.ill] || ''}</span>
+        <span class="thumb">${thumbHtml(g)}</span>
         <span class="tx"><strong>${loc(g.title)}</strong><small>${loc(g.sub)}</small></span>${icon('chevron')}
       </a></li>`).join('')}</ul>`;
   };
@@ -175,8 +182,6 @@
     </form>`;
 
   async function homeView() {
-    const ups = await DataService.getUpdates();
-    const u = ups[0];
     return `
       <div class="logo-wrap"><img class="logo-circle" src="logo.png" alt="FATAL LINKS"></div>
       <p class="tagline">${t('tagline')}</p>
@@ -188,7 +193,7 @@
         <a class="tile prof" href="#/profile">${icon('user', 'big')}<strong>${t('tileProfile')}</strong><small>${t('tileProfileSub')}</small>${icon('chevron', 'chev')}</a>
         <a class="tile off" href="#/offline">${icon('download', 'big')}<strong>${t('tileOffline')}</strong><small>${t('tileOfflineSub')}</small>${icon('chevron', 'chev')}</a>
       </div>
-      <a class="uprow" href="#/updates"><span class="ic">${icon('bell')}</span><span class="tx"><strong>${t('latest')}</strong><small>${loc(u.title)}</small></span>${icon('chevron')}</a>`;
+      <a class="uprow" href="#/updates"><span class="ic">${icon('bell')}</span><span class="tx"><strong>${t('latest')}</strong><small id="uptitle"></small></span>${icon('chevron')}</a>`;
   }
 
   async function libraryView(q) {
@@ -205,14 +210,17 @@
     if (!g) return notFoundView();
     currentGuide = g;
     const fallback = lang !== 'en' && !(g.steps && g.steps[lang]);
-    const li = (o) => (o[lang] || o.en).map((s) => `<li>${s}</li>`).join('');
+    const partial = lang !== 'en' && !fallback && g.igPartial;
+    const li = (o) => (o[lang] || o.en).map((s) => `<li>${esc(s)}</li>`).join('');
+    const steps = g.steps[lang] || g.steps.en;
     return `
-      <div class="hero-ill">${ILL[g.ill] || ''}</div>
+      <div class="hero-ill" ${g.cover ? `data-hero="${esc(g.cover)}"` : ''}>${ILL[g.ill] || ILL.books}</div>
       <h2 class="gtitle"><span>${loc(g.title)}</span></h2>
-      <p class="meta center"><span class="pill">${t('sample')}</span> ${t('updated')} ${fmtDate(g.updated)}</p>
+      <p class="meta center"><span class="pill">${t('sample')}</span> ${t('updated')} ${g.updated ? fmtDate(g.updated) : ''}</p>
       <p class="lead center">${loc(g.summary)}</p>
       ${fallback ? `<p class="notice info">${t('igFallback')}</p>` : ''}
-      <ol class="steps">${(g.steps[lang] || g.steps.en).map((s) => `<li>${s}</li>`).join('')}</ol>
+      ${partial ? `<p class="notice info">${t('igPartial')}</p>` : ''}
+      <ol class="steps">${steps.map((s, i) => `<li>${esc(s)}${g.stepImgs && g.stepImgs[i] ? `<img class="stepimg" data-img="${esc(g.stepImgs[i])}" alt="Picture for step ${i + 1}">` : ''}</li>`).join('')}</ol>
       <button type="button" class="readbtn" data-action="read" ${lang !== 'en' ? 'disabled' : ''}>${icon('play')}<span>${t('readAloud')}</span></button>
       ${lang !== 'en' ? `<p class="hint">${t('audioNA')}</p>` : ''}
       <section class="warn">
@@ -294,7 +302,7 @@
 
   const chip = (on) => `<span class="chip ${on ? 'on' : ''}">${on ? t('sharedChip') : t('privateChip')}</span>`;
 
-  function profileCards(p, email, offlineCopy) {
+  function profileCards(p, email, offlineCopy, adm) {
     const sh = p.share || {};
     const val = (k) => (p[k] ? esc(p[k]) : `<em class="none">${t('noInfo')}</em>`);
     return `
@@ -319,6 +327,7 @@
       <div class="pcard"><h2>${t('account')}</h2>
         <p class="meta">${t('signedInAs')} <strong>${esc(email || '')}</strong></p>
         ${langButtons()}
+        ${adm ? `<a class="secbtn" href="#/admin">${t('adminLink')}</a>` : ''}
         <button type="button" class="secbtn" data-action="signout">${t('signOut')}</button></div>`;
   }
 
@@ -349,10 +358,11 @@
         <div class="pcard"><h2>${t('account')}</h2>
           <p class="meta">${t('signedInAs')} <strong>${esc(user.email || '')}</strong></p>
           ${langButtons()}
+          ${await isAdmin(user.uid) ? `<a class="secbtn" href="#/admin">${t('adminLink')}</a>` : ''}
           <button type="button" class="secbtn" data-action="signout">${t('signOut')}</button></div>`;
     }
     viewProfile = p;
-    return profileCards(p, user.email, offline);
+    return profileCards(p, user.email, offline, await isAdmin(user.uid));
   }
 
   async function profileEditView() {
@@ -601,7 +611,7 @@
     const rest = guides.filter((g) => !dl[g.id]);
     const row = (g, isSaved) => `
       <li><div class="row dlrow">
-        <span class="thumb">${ILL[g.ill] || ''}</span>
+        <span class="thumb">${thumbHtml(g)}</span>
         <span class="tx"><strong>${loc(g.title)}</strong><small>${isSaved ? `${t('downloaded')} &middot; ${sizeKB(g)} KB &middot; ${fmtDate(dl[g.id])}` : t('download')}</small></span>
         <button type="button" class="dlbtn ${isSaved ? 'done' : ''}" data-dl="${g.id}" aria-label="${isSaved ? t('remove') : t('download')}: ${loc(g.title)}">${icon(isSaved ? 'check' : 'download')}</button>
       </div></li>`;
@@ -647,7 +657,7 @@
     if (!('speechSynthesis' in window)) { alert(t('noSpeech')); return; }
     if (speaking) { stopSpeech(); return; }
     const g = currentGuide;
-    const parts = [loc(g.title) + '.'].concat(g.steps.en.map((s, i) => `Step ${i + 1}. ${s}`));
+    const parts = [locRaw(g.title) + '.'].concat(g.steps.en.map((s, i) => `Step ${i + 1}. ${s}`));
     window.speechSynthesis.cancel();
     parts.forEach((txt, i) => {
       const u = new SpeechSynthesisUtterance(txt);
@@ -657,6 +667,42 @@
     });
     speaking = true;
     setReadUI();
+  }
+
+  /* ---------- pictures + latest update fill-in after a page is drawn ---------- */
+  function hydrate() {
+    document.querySelectorAll('img[data-img]').forEach(async (el) => {
+      const d = await DataService.getImage(el.getAttribute('data-img'));
+      if (d) el.src = d; else el.remove();
+    });
+    document.querySelectorAll('[data-hero]').forEach(async (el) => {
+      const d = await DataService.getImage(el.getAttribute('data-hero'));
+      if (d) el.innerHTML = `<img class="heroimg" src="${d}" alt="">`;
+    });
+    if (document.getElementById('uptitle')) {
+      DataService.getUpdates().then((ups) => {
+        const el = document.getElementById('uptitle');
+        if (el && ups[0]) el.textContent = locRaw(ups[0].title);
+      });
+    }
+  }
+
+  /* ---------- admin pages (code loads only when opened) ---------- */
+  const adminCache = {};
+  async function isAdmin(uid) {
+    if (adminCache[uid]) return true;   // only a "yes" is remembered, so setting up admin works without reloading
+    try { const ok = await window.FB.isAdmin(uid); if (ok) adminCache[uid] = true; return ok; } catch (e) { return false; }
+  }
+  function loadAdmin() {
+    return window.FLAdmin ? Promise.resolve() : new Promise((res, rej) => {
+      const el = document.createElement('script');
+      el.src = 'admin.js'; el.onload = res; el.onerror = rej;
+      document.head.appendChild(el);
+    });
+  }
+  async function adminView(parts) {
+    try { await loadAdmin(); } catch (e) { return `<p class="notice info">${t('needInternet')}</p>`; }
+    return window.FLAdmin.entry(parts);
   }
 
   /* ---------- router ---------- */
@@ -676,6 +722,7 @@
       case 'guide': html = await guideView(arg); break;
       case 'scan': html = await scanView(); break;
       case 'e': html = await emergencyView(arg); break;
+      case 'admin': html = await adminView(parts.slice(1)); break;
       case 'profile':
       case 'emergency-profile': html = await profileView(); break;
       case 'profile-edit': html = await profileEditView(); break;
@@ -685,6 +732,7 @@
     }
     app.innerHTML = html;
     app.className = 'main ' + name;
+    hydrate();
     window.scrollTo(0, 0);
   }
 
@@ -744,7 +792,7 @@
     if (box) box.innerHTML = guideRows(guides, e.target.value.trim());
   });
 
-  const PROFILE_ROUTES = ['profile', 'emergency-profile', 'profile-edit'];
+  const PROFILE_ROUTES = ['profile', 'emergency-profile', 'profile-edit', 'admin'];
   function startFirebase() {
     fbState = 'ready';
     window.FB.onAuth((u) => {
@@ -752,8 +800,13 @@
       if (!u) { try { localStorage.removeItem('fl_pcache'); } catch (e) {} }
       if (PROFILE_ROUTES.includes(routeName())) render();
     });
-    if (routeName() === 'e') render();
+    if (routeName() === 'e' || routeName() === 'admin') render();
   }
+  window.addEventListener('fl-data', () => {
+    const a = document.activeElement;
+    if (['home', 'library', 'search', 'offline', 'updates'].includes(routeName()) && !(a && /INPUT|TEXTAREA/.test(a.tagName))) render();
+  });
+  window.FL = { esc, icon, t, loc, locRaw, user: () => user, fbState: () => fbState, isAdmin, rerender: () => render() };
   window.addEventListener('fb-ready', startFirebase);
   window.addEventListener('fb-failed', () => { fbState = 'failed'; if (PROFILE_ROUTES.concat('e').includes(routeName())) render(); });
   if (window.FB) startFirebase();

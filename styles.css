@@ -247,3 +247,27 @@ a.bigbtn.link { margin-top: 10px; }
   .plabel strong { display: block; font-size: 9pt; margin-top: 2px; }
   .plabel span { display: block; font-size: 7pt; }
 }
+
+/* content from Firebase + admin pages */
+.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.heroimg { width: 100%; height: 100%; object-fit: cover; border-radius: 22px; display: block; }
+.hero-ill:has(.heroimg) { padding: 0; overflow: hidden; }
+.stepimg { display: block; width: 100%; max-height: 260px; object-fit: cover; border-radius: 14px; margin-top: 10px; background: var(--sky); }
+img[data-img]:not([src]) { display: none; }
+.vh { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.imgwrap { margin: 6px 0 12px; }
+.imgbox { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 130px; border: 2px dashed #8FA6DC; border-radius: 16px; background: #fff; color: var(--navy); font-weight: 700; cursor: pointer; overflow: hidden; }
+.imgbox .plus { font-size: 38px; line-height: 1; }
+.imgbox.has { border-style: solid; border-color: var(--line); }
+.imgbox img { display: block; width: 100%; max-height: 240px; object-fit: cover; }
+.imgbox.busy { opacity: .5; pointer-events: none; }
+.imgbox:focus-within { box-shadow: 0 0 0 3px #FFB400; }
+.stepcard { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 12px; margin-bottom: 12px; }
+.steptop { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: var(--navy); }
+.mini { width: 44px; height: 44px; margin-left: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--sky-2); color: var(--navy); font-size: 20px; font-weight: 800; cursor: pointer; }
+.mini:disabled { opacity: .35; }
+.mini.del { color: var(--red-d); }
+.secbtn.danger { border-color: var(--red); color: var(--red-d); }
+.howto { padding-left: 20px; margin: 8px 0 12px; }
+.howto li { margin-bottom: 6px; }
+.uid { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px; word-break: break-all; font-family: ui-monospace, monospace; font-size: 15px; margin: 4px 0 8px; }
