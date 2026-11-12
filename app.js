@@ -922,7 +922,7 @@
       default: html = notFoundView();
     }
     app.innerHTML = html;
-    app.className = 'main ' + name;
+    app.className = 'main page-' + name;   // prefixed so a page name can never clash with a style name
     hydrate();
     if (name === 'guide') updateReadButtons();
     if (['home', 'library', 'search', 'updates', 'offline', 'facilities'].includes(name)) DataService.refreshSoon();
