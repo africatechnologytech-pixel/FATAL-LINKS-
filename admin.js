@@ -3,6 +3,7 @@
 // Only accounts listed in Firebase under "admins" can save changes (the security rules enforce this).
 (function () {
   'use strict';
+  if (window.FLAdmin) return;   // never set up twice
   const FL = window.FL, esc = FL.esc, icon = FL.icon;
   const $ = (id) => document.getElementById(id);
   const FB = () => window.FB;
@@ -99,10 +100,21 @@
       ${id ? `<button type="button" class="linkbtn" data-ad="rmimg" data-which="${which}" data-i="${i}">Remove picture</button>` : ''}
     </div>`;
 
+  const audioBox = (i, id) => `
+    <div class="audiobox">
+      <strong>Igbo audio (optional)</strong>
+      ${id ? `<audio controls preload="none" data-aprev="${esc(id)}"></audio>
+        <button type="button" class="linkbtn" data-ad="rmaudio" data-i="${i}">Remove audio</button>` : '<p class="meta">No audio yet. Record it here or choose a sound file.</p>'}
+      <div class="arow">
+        <button type="button" class="secbtn rec" data-ad="rec" data-i="${i}">${icon('mic')}<span>Record</span></button>
+        <label class="secbtn filebtn">Choose file<input class="vh" type="file" accept="audio/*" data-ad-audio="${i}"></label>
+      </div>
+    </div>`;
+
   /* ---------- guide editor ---------- */
   const emptyGuide = (order) => ({
     __id: 'new', order, title: { en: '', ig: '' }, sub: { en: '', ig: '' }, summary: { en: '', ig: '' },
-    cover: null, thumb: null, ill: null, steps: [{ text: { en: '', ig: '' }, img: null }],
+    cover: null, thumb: null, ill: null, steps: [{ text: { en: '', ig: '' }, img: null, audio: null }],
     callIf: { en: '', ig: '' }, dont: { en: '', ig: '' }
   });
   const fromDoc = (id, d) => ({
@@ -111,7 +123,7 @@
     sub: { en: (d.sub && d.sub.en) || '', ig: (d.sub && d.sub.ig) || '' },
     summary: { en: (d.summary && d.summary.en) || '', ig: (d.summary && d.summary.ig) || '' },
     cover: d.cover || null, thumb: d.thumb || null, ill: d.ill || null,
-    steps: (d.steps && d.steps.length ? d.steps : [{}]).map((s) => ({ text: { en: (s.text && s.text.en) || '', ig: (s.text && s.text.ig) || '' }, img: s.img || null })),
+    steps: (d.steps && d.steps.length ? d.steps : [{}]).map((s) => ({ text: { en: (s.text && s.text.en) || '', ig: (s.text && s.text.ig) || '' }, img: s.img || null, audio: (s.audio && s.audio.ig) || null })),
     callIf: { en: ((d.callIf && d.callIf.en) || []).join('\n'), ig: ((d.callIf && d.callIf.ig) || []).join('\n') },
     dont: { en: ((d.dont && d.dont.en) || []).join('\n'), ig: ((d.dont && d.dont.ig) || []).join('\n') }
   });
@@ -152,6 +164,7 @@
               ${imgBox('step', i, s.img)}
               ${field('step_en_' + i, 'Text (English)', s.text.en, { area: true, rows: 3 })}
               ${field('step_ig_' + i, 'Text (Igbo, optional)', s.text.ig, { area: true, rows: 3 })}
+              ${audioBox(i, s.audio)}
             </div>`).join('')}
           <button type="button" class="secbtn" data-ad="addstep">+ Add step</button>
         </div>
@@ -181,6 +194,11 @@
   }
 
   async function hydratePreviews() {
+    document.querySelectorAll('audio[data-aprev]').forEach(async (el) => {
+      const id = el.getAttribute('data-aprev');
+      const src = previews[id] || (await DataService.getAudio(id));
+      if (src) el.src = src;
+    });
     document.querySelectorAll('img[data-prev]').forEach(async (el) => {
       const id = el.getAttribute('data-prev');
       const src = previews[id] || (await DataService.getImage(id));
@@ -233,6 +251,51 @@
     }
   }
 
+  /* ---------- Igbo audio: record with the microphone or choose a file ---------- */
+  let rec = null;
+  const toDataUrl = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+  const clock = (sec) => Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+
+  async function saveClip(i, blob) {
+    collect();
+    let data;
+    try { data = await toDataUrl(blob); } catch (e) { return showErr('Could not read that audio.'); }
+    if (data.length > 600000) return showErr('That clip is too long. Keep each clip under about 30 seconds.');
+    const id = newId();
+    try { await FB().saveAudio(id, data); } catch (e) { return showErr('Could not save the audio. Check your internet and that the new rules are published.'); }
+    previews[id] = data;
+    draft.steps[i].audio = id;
+    rerender();
+  }
+
+  async function toggleRecord(i, btn) {
+    if (rec) { stopRecording(); return; }
+    if (!navigator.mediaDevices || !window.MediaRecorder) return showErr('Recording is not supported in this browser. Use "Choose file" instead.');
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { return showErr('Microphone permission was denied. Allow the microphone and try again.'); }
+    let mr;
+    try { mr = new MediaRecorder(stream, { audioBitsPerSecond: 32000 }); } catch (e) { mr = new MediaRecorder(stream); }
+    const chunks = [];
+    mr.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    const label = btn.querySelector('span');
+    rec = { mr, stream, started: Date.now(), timer: null };
+    mr.onstop = async () => {
+      clearInterval(rec && rec.timer);
+      stream.getTracks().forEach((t) => t.stop());
+      rec = null;
+      if (chunks.length) await saveClip(i, new Blob(chunks, { type: mr.mimeType || 'audio/webm' }));
+    };
+    mr.start();
+    label.textContent = 'Stop (0:00)';
+    rec.timer = setInterval(() => {
+      const sec = Math.round((Date.now() - rec.started) / 1000);
+      label.textContent = 'Stop (' + clock(sec) + ')';
+      if (sec >= 30) stopRecording();   // keep clips short
+    }, 500);
+  }
+  function stopRecording() { if (rec && rec.mr.state !== 'inactive') rec.mr.stop(); }
+
   /* ---------- saving ---------- */
   async function saveGuide() {
     collect();
@@ -244,7 +307,8 @@
     const doc = {
       order: d.order, title: d.title, sub: d.sub, summary: d.summary, updated: todayISO(),
       cover: d.cover || null, thumb: d.thumb || null, ill: d.ill || null,
-      steps: steps.map((s) => ({ text: { en: s.text.en.trim(), ig: s.text.ig.trim() }, img: s.img || null })),
+      steps: steps.map((s) => ({ text: { en: s.text.en.trim(), ig: s.text.ig.trim() }, img: s.img || null, audio: { ig: s.audio || null } })),
+      rev: Date.now(),
       callIf: { en: lines(d.callIf.en), ig: lines(d.callIf.ig) },
       dont: { en: lines(d.dont.en), ig: lines(d.dont.ig) }
     };
@@ -265,8 +329,10 @@
     if (!draft || draft.__id === 'new' || !confirm('Delete this guide for everyone? This cannot be undone.')) return;
     try {
       const ids = [draft.cover].concat(draft.steps.map((s) => s.img)).filter(Boolean);
+      const auds = draft.steps.map((s) => s.audio).filter(Boolean);
       await FB().deleteGuide(draft.__id);
       ids.forEach((i) => FB().deleteImage(i).catch(() => {}));
+      auds.forEach((i) => FB().deleteAudio(i).catch(() => {}));
       DataService.invalidate();
       draft = null;
       location.hash = '#/admin/guides';
@@ -335,11 +401,11 @@
     const a = b.getAttribute('data-ad'), i = Number(b.getAttribute('data-i'));
     if (a === 'seed') seed();
     else if (a === 'copyuid') { const el = $('myuid'); if (el && navigator.clipboard) navigator.clipboard.writeText(el.textContent).then(() => { b.textContent = 'Copied'; }); }
-    else if (a === 'addstep') { collect(); draft.steps.push({ text: { en: '', ig: '' }, img: null }); rerender(); }
+    else if (a === 'addstep') { collect(); draft.steps.push({ text: { en: '', ig: '' }, img: null, audio: null }); rerender(); }
     else if (a === 'delstep') {
       if (!confirm('Delete this step?')) return;
       collect(); draft.steps.splice(i, 1);
-      if (!draft.steps.length) draft.steps.push({ text: { en: '', ig: '' }, img: null });
+      if (!draft.steps.length) draft.steps.push({ text: { en: '', ig: '' }, img: null, audio: null });
       rerender();
     }
     else if (a === 'up' || a === 'down') {
@@ -353,13 +419,26 @@
       if (b.getAttribute('data-which') === 'cover') { draft.cover = null; draft.thumb = null; } else draft.steps[i].img = null;
       rerender();
     }
+    else if (a === 'rec') toggleRecord(i, b);
+    else if (a === 'rmaudio') { collect(); draft.steps[i].audio = null; rerender(); }
     else if (a === 'delguide') deleteGuide();
     else if (a === 'delupdate') {
       if (!draft || !confirm('Delete this update for everyone?')) return;
       FB().deleteUpdate(draft.__id).then(() => { DataService.invalidate(); draft = null; location.hash = '#/admin/updates'; }).catch(() => showErr('Could not delete.'));
     }
   });
-  document.addEventListener('change', (e) => { if (e.target.matches && e.target.matches('input[data-ad-file]')) onFile(e.target); });
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    if (!el.matches) return;
+    if (el.matches('input[data-ad-file]')) onFile(el);
+    else if (el.matches('input[data-ad-audio]')) {
+      const f = el.files && el.files[0];
+      if (!f) return;
+      if (!f.type || f.type.indexOf('audio/') !== 0) return showErr('Please choose an audio file.');
+      if (f.size > 450000) return showErr('That file is too big. Use a clip under about 30 seconds (under 450 KB).');
+      saveClip(Number(el.getAttribute('data-ad-audio')), f);
+    }
+  });
   document.addEventListener('submit', (e) => {
     const f = e.target;
     if (!f.matches || !f.matches('[data-adform]')) return;

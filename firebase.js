@@ -28,7 +28,8 @@ const SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
     let db;
     try {
       db = fsMod.initializeFirestore(app, {
-        localCache: fsMod.persistentLocalCache({ tabManager: fsMod.persistentMultipleTabManager() })
+        localCache: fsMod.persistentLocalCache({ tabManager: fsMod.persistentMultipleTabManager() }),
+        experimentalAutoDetectLongPolling: true   // helps on networks that block the normal connection
       });
     } catch (e) {
       db = fsMod.getFirestore(app);
@@ -94,6 +95,12 @@ const SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
       deleteGuide: (id) => fsMod.deleteDoc(D('guides', id)),
       saveUpdate: (id, data) => fsMod.setDoc(D('updates', id), data),
       deleteUpdate: (id) => fsMod.deleteDoc(D('updates', id)),
+      async getAudio(id) {
+        const snap = await fsMod.getDoc(D('audio', id));
+        return snap.exists() ? snap.data().data : null;
+      },
+      saveAudio: (id, dataUrl) => fsMod.setDoc(D('audio', id), { data: dataUrl, createdAt: fsMod.serverTimestamp() }),
+      deleteAudio: (id) => fsMod.deleteDoc(D('audio', id)),
       saveImage: (id, dataUrl) => fsMod.setDoc(D('images', id), { data: dataUrl, createdAt: fsMod.serverTimestamp() }),
       deleteImage: (id) => fsMod.deleteDoc(D('images', id)),
       async seed(guides, updates) {

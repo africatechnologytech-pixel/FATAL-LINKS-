@@ -25,9 +25,7 @@
   const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const todayISO = () => new Date().toISOString().slice(0, 10);
 
-  const dlGet = () => { try { return JSON.parse(localStorage.getItem('fl_dl') || '{}'); } catch (e) { return {}; } };
-  const dlSet = (o) => { try { localStorage.setItem('fl_dl', JSON.stringify(o)); } catch (e) {} };
-  const sizeKB = (g) => Math.max(1, Math.round(JSON.stringify(g).length / 1024));
+  const fmtSize = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 
   const ICONS = {
     home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
@@ -49,6 +47,8 @@
     plus: '<path d="M12 5v14M5 12h14"/>',
     check: '<circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-6"/>',
     pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+    mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+    trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
     drop: '<path d="M12 3C8 9 6 12 6 15a6 6 0 0 0 12 0c0-3-2-6-6-12z"/>',
     heart: '<path d="M12 20s-8-5-8-11a4.5 4.5 0 0 1 8-2.5A4.5 4.5 0 0 1 20 9c0 6-8 11-8 11z"/>',
     pill: '<rect x="3" y="9" width="18" height="6" rx="3" transform="rotate(-35 12 12)"/><path d="M10 7.5l4.5 4.5" transform="rotate(0)"/>'
@@ -105,7 +105,7 @@
           <a class="iconbtn light" href="${p.back}" aria-label="${t('back')}">${icon('back')}</a>
           <h1 class="ptitle">${t(p.title)}</h1>
           ${p.speaker
-            ? `<button type="button" class="iconbtn light" data-action="read" aria-label="${t('readAloud')}" ${lang !== 'en' ? 'disabled' : ''}>${icon('speaker')}</button>`
+            ? `<button type="button" class="iconbtn light" data-action="read" aria-label="${t('readAloud')}">${icon('speaker')}</button>`
             : (p.edit && user ? `<a class="iconbtn light" href="#/profile-edit" aria-label="${t('editProfile')}">${icon('pen')}</a>` : '<span class="iconbtn"></span>')}
         </div>`;
     }
@@ -220,9 +220,10 @@
       <p class="lead center">${loc(g.summary)}</p>
       ${fallback ? `<p class="notice info">${t('igFallback')}</p>` : ''}
       ${partial ? `<p class="notice info">${t('igPartial')}</p>` : ''}
-      <ol class="steps">${steps.map((s, i) => `<li>${esc(s)}${g.stepImgs && g.stepImgs[i] ? `<img class="stepimg" data-img="${esc(g.stepImgs[i])}" alt="Picture for step ${i + 1}">` : ''}</li>`).join('')}</ol>
-      <button type="button" class="readbtn" data-action="read" ${lang !== 'en' ? 'disabled' : ''}>${icon('play')}<span>${t('readAloud')}</span></button>
-      ${lang !== 'en' ? `<p class="hint">${t('audioNA')}</p>` : ''}
+      <ol class="steps">${steps.map((s, i) => `<li data-step="${i}">${esc(s)}${g.stepImgs && g.stepImgs[i] ? `<img class="stepimg" data-img="${esc(g.stepImgs[i])}" alt="Picture for step ${i + 1}">` : ''}${lang === 'en' || (g.stepAudioIg && g.stepAudioIg[i]) ? `<button type="button" class="listen" data-action="playstep" data-i="${i}" aria-label="${t('listen')} - ${i + 1}">${icon('speaker')}<span>${t('listen')}</span></button>` : ''}</li>`).join('')}</ol>
+      <button type="button" class="readbtn" data-action="read">${icon('play')}<span>${t('readAloud')}</span></button>
+      ${lang !== 'en' && !hasIgAudio(g) ? `<p class="hint">${t('audioNA')}</p>` : ''}
+      ${lang !== 'en' && hasIgAudio(g) && g.stepAudioIg.some((x) => !x) ? `<p class="hint">${t('audioPartial')}</p>` : ''}
       <section class="warn">
         <div class="wr">${icon('alert')}<div><strong>${t('avoid')}</strong><ul>${li(g.dont)}</ul></div></div>
         <div class="wr">${icon('plus')}<div><strong>${t('seekHelp')}</strong><ul>${li(g.callIf)}</ul></div></div>
@@ -606,28 +607,73 @@
 
   async function offlineView() {
     const guides = await DataService.getGuides();
-    const dl = dlGet();
-    const saved = guides.filter((g) => dl[g.id]);
-    const rest = guides.filter((g) => !dl[g.id]);
-    const row = (g, isSaved) => `
-      <li><div class="row dlrow">
+    const recs = await OfflineStore.list();
+    const live = {}, map = {};
+    guides.forEach((g) => { live[g.id] = g; });
+    recs.forEach((r) => { map[r.id] = r; });
+    const savedRows = recs.map((r) => {
+      const g = live[r.id] || r.guide;
+      const upd = !!live[r.id] && (live[r.id].rev || 0) > ((r.guide && r.guide.rev) || 0);
+      return `<li><div class="row dlrow">
         <span class="thumb">${thumbHtml(g)}</span>
-        <span class="tx"><strong>${loc(g.title)}</strong><small>${isSaved ? `${t('downloaded')} &middot; ${sizeKB(g)} KB &middot; ${fmtDate(dl[g.id])}` : t('download')}</small></span>
-        <button type="button" class="dlbtn ${isSaved ? 'done' : ''}" data-dl="${g.id}" aria-label="${isSaved ? t('remove') : t('download')}: ${loc(g.title)}">${icon(isSaved ? 'check' : 'download')}</button>
+        <a class="tx" href="#/guide/${esc(r.id)}"><strong>${loc(g.title)}</strong>
+          <small>${t('downloaded')} &middot; ${fmtSize(r.size || 0)} &middot; ${fmtDate(new Date(r.savedAt).toISOString().slice(0, 10))}</small>
+          ${upd ? `<small class="upd-tag">${t('updateAvail')}</small>` : ''}</a>
+        ${upd ? `<button type="button" class="dlbtn" data-dl="${esc(r.id)}" aria-label="${t('update')}: ${loc(g.title)}">${icon('download')}</button>` : ''}
+        <button type="button" class="dlbtn rm" data-rm="${esc(r.id)}" aria-label="${t('remove')}: ${loc(g.title)}">${icon('trash')}</button>
       </div></li>`;
+    });
+    const rest = guides.filter((g) => !map[g.id]).map((g) => `<li><div class="row dlrow">
+        <span class="thumb">${thumbHtml(g)}</span>
+        <a class="tx" href="#/guide/${esc(g.id)}"><strong>${loc(g.title)}</strong><small>${t('download')}</small></a>
+        <button type="button" class="dlbtn" data-dl="${esc(g.id)}" aria-label="${t('download')}: ${loc(g.title)}">${icon('download')}</button>
+      </div></li>`);
     return `
       <div class="hero-ill small">${ILL.books}</div>
       <p class="offhead">${t('offHead')}</p>
       <h2 class="sec">${t('saved')}</h2>
-      ${saved.length ? `<ul class="list">${saved.map((g) => row(g, true)).join('')}</ul>` : `<p class="empty">${t('nothingSaved')}</p>`}
-      ${rest.length ? `<h2 class="sec">${t('available')}</h2><ul class="list">${rest.map((g) => row(g, false)).join('')}</ul>` : ''}
+      ${savedRows.length ? `<ul class="list">${savedRows.join('')}</ul>` : `<p class="empty">${t('nothingSaved')}</p>`}
+      ${rest.length ? `<h2 class="sec">${t('available')}</h2><ul class="list">${rest.join('')}</ul>` : ''}
       <p class="notice info">${t('offNote')}</p>`;
+  }
+
+  // Saves a guide's text, pictures and Igbo audio on this phone.
+  async function downloadGuide(id, btn) {
+    const g = await DataService.getGuide(id);
+    if (!g) return;
+    btn.disabled = true; btn.classList.add('busy');
+    try {
+      const blobs = [];
+      for (const mid of [g.cover].concat(g.stepImgs || []).filter(Boolean)) {
+        const d = await DataService.getImage(mid);
+        if (!d) throw new Error('image');
+        blobs.push({ id: mid, data: d });
+      }
+      for (const mid of (g.stepAudioIg || []).filter(Boolean)) {
+        const d = await DataService.getAudio(mid);
+        if (!d) throw new Error('audio');
+        blobs.push({ id: mid, data: d });
+      }
+      await OfflineStore.save(g, blobs);
+      app.innerHTML = await offlineView();
+    } catch (e) {
+      alert(t('dlFail'));
+      btn.disabled = false; btn.classList.remove('busy');
+    }
+  }
+
+  function statusText(which) {
+    const st = DataService.status(which);
+    if (st.at === null) return t('checking');
+    return st.ok ? t('checkedNow') : t('savedCopy') + (st.err ? ' (' + st.err + ')' : '');
   }
 
   async function updatesView() {
     const ups = await DataService.getUpdates();
     return `
       <p class="lead">${t('updatesIntro')}</p>
+      <p class="statusline"><span id="datastatus">${esc(statusText('updates'))}</span>
+        <button type="button" class="linkbtn inline" data-action="refreshdata">${t('refresh')}</button></p>
       <ul class="list">
         ${ups.map((u) => `<li class="upd"><small>${fmtDate(u.date)}</small><strong>${loc(u.title)}</strong><p>${loc(u.body)}</p></li>`).join('')}
       </ul>`;
@@ -637,7 +683,13 @@
     return `<div class="ph"><h2>${t('notFound')}</h2><p>${t('notFoundText')}</p><a class="bigbtn link" href="#/">${t('goHome')}</a></div>`;
   }
 
-  /* ---------- read aloud (English uses the phone's voice; Igbo audio comes later) ---------- */
+  /* ---------- read aloud: English = the phone's voice, Igbo = your recorded clips ---------- */
+  let audioEl = null, audioQueue = [], speechToken = 0, playingStep = -1;
+  const hasIgAudio = (g) => !!(g && g.stepAudioIg && g.stepAudioIg.some(Boolean));
+
+  function highlight(i) {
+    document.querySelectorAll('.steps li').forEach((li, k) => li.classList.toggle('playing', k === i));
+  }
   function setReadUI() {
     document.querySelectorAll('[data-action="read"]').forEach((b) => {
       b.classList.toggle('on', speaking);
@@ -647,26 +699,72 @@
       if (svg && b.classList.contains('readbtn')) svg.innerHTML = speaking ? ICONS.stop : ICONS.play;
     });
   }
-  function stopSpeech() {
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-    speaking = false;
-    setReadUI();
+  function updateReadButtons() {
+    const ok = lang === 'en' || hasIgAudio(currentGuide);
+    document.querySelectorAll('[data-action="read"]').forEach((b) => { b.disabled = !ok; });
   }
-  function readGuide() {
-    if (lang !== 'en' || !currentGuide) return;
+  function stopSpeech() {
+    speechToken++;   // ignore late events from anything we just stopped
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    if (audioEl) { audioEl.onended = audioEl.onerror = null; audioEl.pause(); audioEl = null; }
+    audioQueue = []; speaking = false; playingStep = -1;
+    highlight(-1); setReadUI();
+  }
+
+  async function nextClip(token) {
+    if (token !== speechToken) return;
+    if (!audioQueue.length) { stopSpeech(); return; }
+    const i = audioQueue.shift();
+    const id = currentGuide && currentGuide.stepAudioIg && currentGuide.stepAudioIg[i];
+    const src = id ? await DataService.getAudio(id) : null;
+    if (token !== speechToken) return;
+    if (!src) { nextClip(token); return; }
+    highlight(i);
+    audioEl = new Audio(src);
+    audioEl.onended = () => nextClip(token);
+    audioEl.onerror = () => nextClip(token);
+    audioEl.play().catch(() => { if (token === speechToken) stopSpeech(); });
+  }
+  function playClips(indices) {
+    stopSpeech();
+    if (!indices.length) return;
+    audioQueue = indices.slice(); speaking = true; setReadUI();
+    nextClip(speechToken);
+  }
+
+  function speakEnglish(g, from, to, withTitle) {
     if (!('speechSynthesis' in window)) { alert(t('noSpeech')); return; }
-    if (speaking) { stopSpeech(); return; }
-    const g = currentGuide;
-    const parts = [locRaw(g.title) + '.'].concat(g.steps.en.map((s, i) => `Step ${i + 1}. ${s}`));
-    window.speechSynthesis.cancel();
-    parts.forEach((txt, i) => {
-      const u = new SpeechSynthesisUtterance(txt);
+    stopSpeech();
+    const token = speechToken, synth = window.speechSynthesis;
+    const items = [];
+    if (withTitle) items.push({ txt: locRaw(g.title) + '.', i: -1 });
+    for (let i = from; i <= to; i++) items.push({ txt: 'Step ' + (i + 1) + '. ' + g.steps.en[i], i });
+    items.forEach((it, k) => {
+      const u = new SpeechSynthesisUtterance(it.txt);
       u.lang = 'en'; u.rate = 0.95;
-      if (i === parts.length - 1) { u.onend = () => { speaking = false; setReadUI(); }; u.onerror = u.onend; }
-      window.speechSynthesis.speak(u);
+      u.onstart = () => { if (token === speechToken) highlight(it.i); };
+      if (k === items.length - 1) u.onend = u.onerror = () => { if (token === speechToken) stopSpeech(); };
+      synth.speak(u);
     });
-    speaking = true;
-    setReadUI();
+    speaking = true; setReadUI();
+  }
+
+  function readGuide() {
+    const g = currentGuide;
+    if (!g) return;
+    if (speaking) { stopSpeech(); return; }
+    if (lang !== 'en') {
+      const idx = [];
+      (g.stepAudioIg || []).forEach((id, i) => { if (id) idx.push(i); });
+      playClips(idx);
+    } else speakEnglish(g, 0, g.steps.en.length - 1, true);
+  }
+  function playStep(i) {
+    const g = currentGuide;
+    if (!g) return;
+    if (speaking && playingStep === i) { stopSpeech(); return; }
+    if (lang !== 'en') playClips([i]); else speakEnglish(g, i, i, false);
+    playingStep = i;
   }
 
   /* ---------- pictures + latest update fill-in after a page is drawn ---------- */
@@ -693,12 +791,18 @@
     if (adminCache[uid]) return true;   // only a "yes" is remembered, so setting up admin works without reloading
     try { const ok = await window.FB.isAdmin(uid); if (ok) adminCache[uid] = true; return ok; } catch (e) { return false; }
   }
+  let adminLoading = null;
   function loadAdmin() {
-    return window.FLAdmin ? Promise.resolve() : new Promise((res, rej) => {
-      const el = document.createElement('script');
-      el.src = 'admin.js'; el.onload = res; el.onerror = rej;
-      document.head.appendChild(el);
-    });
+    if (window.FLAdmin) return Promise.resolve();
+    if (!adminLoading) {
+      adminLoading = new Promise((res, rej) => {
+        const el = document.createElement('script');
+        el.src = 'admin.js'; el.onload = res;
+        el.onerror = () => { adminLoading = null; rej(new Error('admin.js')); };
+        document.head.appendChild(el);
+      });
+    }
+    return adminLoading;
   }
   async function adminView(parts) {
     try { await loadAdmin(); } catch (e) { return `<p class="notice info">${t('needInternet')}</p>`; }
@@ -733,6 +837,8 @@
     app.innerHTML = html;
     app.className = 'main ' + name;
     hydrate();
+    if (name === 'guide') updateReadButtons();
+    if (['home', 'library', 'search', 'updates', 'offline'].includes(name)) DataService.refreshSoon();
     window.scrollTo(0, 0);
   }
 
@@ -751,6 +857,12 @@
       if (a === 'menu') openDrawer();
       else if (a === 'close') closeDrawer();
       else if (a === 'read') readGuide();
+      else if (a === 'playstep') playStep(Number(act.getAttribute('data-i')));
+      else if (a === 'refreshdata') {
+        const el = document.getElementById('datastatus');
+        if (el) el.textContent = t('checking');
+        DataService.refreshNow();
+      }
       else if (a === 'authmode') { authMode = act.getAttribute('data-mode'); render(); }
       else if (a === 'forgot') doForgot();
       else if (a === 'scanstart') startScan();
@@ -765,11 +877,10 @@
       return;
     }
     const dl = e.target.closest('[data-dl]');
-    if (dl) {
-      const id = dl.getAttribute('data-dl');
-      const st = dlGet();
-      if (st[id]) delete st[id]; else st[id] = todayISO();
-      dlSet(st);
+    if (dl) { await downloadGuide(dl.getAttribute('data-dl'), dl); return; }
+    const rm = e.target.closest('[data-rm]');
+    if (rm && confirm(t('removeConfirm'))) {
+      await OfflineStore.remove(rm.getAttribute('data-rm'));
       app.innerHTML = await offlineView();
     }
   });
@@ -802,6 +913,10 @@
     });
     if (routeName() === 'e' || routeName() === 'admin') render();
   }
+  window.addEventListener('fl-status', () => {
+    const el = document.getElementById('datastatus');
+    if (el) el.textContent = statusText('updates');
+  });
   window.addEventListener('fl-data', () => {
     const a = document.activeElement;
     if (['home', 'library', 'search', 'offline', 'updates'].includes(routeName()) && !(a && /INPUT|TEXTAREA/.test(a.tagName))) render();

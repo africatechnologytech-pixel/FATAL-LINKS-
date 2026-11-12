@@ -35,7 +35,7 @@ const I18N = {
     scanHint: 'Scan the wristband QR code',
     scanSoon: 'Camera scanning arrives in build step 6. This screen shows how it will look.',
     offHead: 'Download First-Aid Guides for Offline Use',
-    offNote: 'Saving here marks a guide for offline use. Full offline storage of content comes in build step 4.',
+    offNote: 'Downloaded guides open without internet, with their pictures and Igbo audio. When a guide changes, an Update button appears.',
     saved: 'Saved on this phone', available: 'Available to download',
     download: 'Download', downloaded: 'Downloaded', remove: 'Remove',
     nothingSaved: 'Nothing saved yet. Tap a guide below to download it.',
@@ -97,6 +97,11 @@ const I18N = {
     scanOr: 'You can also open your phone\'s camera app and point it at the wristband.',
     adminTitle: 'Content Manager', adminLink: 'Content manager (admin)',
     igPartial: 'Some steps are not yet in Igbo. Those show in English.',
+    listen: 'Listen', audioPartial: 'Some steps have no Igbo audio yet.',
+    update: 'Update', updateAvail: 'Update available', removeConfirm: 'Remove this guide from your phone?',
+    dlFail: 'Could not download. Check your internet and try again.',
+    checking: 'Checking for news...', checkedNow: 'Up to date. Checked just now.',
+    savedCopy: 'Could not reach the server. Showing the copy saved on this phone', refresh: 'Refresh',
     notFound: 'Page not found', notFoundText: 'That page does not exist.', goHome: 'Go to Home'
   },
 
@@ -134,6 +139,7 @@ const I18N = {
     signInBtn: 'Banye', createAcct: 'Mepụta akaụntụ', email: 'Email', password: 'Paswọdụ',
     save: 'Chekwa', cancel: 'Kagbuo', fullName: 'Aha zuru ezu', age: 'Afọ',
     qrTitle: 'QR Koodu Mgbaaka Aka', scanStart: 'Malite igwefoto', emgTitle: 'Ozi Mberede',
+    listen: 'Gee ntị',
     goHome: 'Gaa n\'Ụlọ'
   }
 };

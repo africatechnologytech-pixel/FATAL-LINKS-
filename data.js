@@ -157,6 +157,41 @@ const SAMPLE_PROFILE = {
 };
 
 
+/* ---------- guides saved on the phone for offline use (IndexedDB) ---------- */
+const OfflineStore = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open('fl_offline', 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore('guides', { keyPath: 'id' }); r.result.createObjectStore('blobs', { keyPath: 'id' }); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  }));
+  const tx = async (store, mode, fn) => {
+    const d = await open();
+    return new Promise((res, rej) => {
+      const t = d.transaction(store, mode);
+      const req = fn(t.objectStore(store));
+      t.oncomplete = () => res(req ? req.result : undefined);
+      t.onerror = t.onabort = () => rej(t.error);
+    });
+  };
+  return {
+    async list() { try { return (await tx('guides', 'readonly', (s) => s.getAll())) || []; } catch (e) { return []; } },
+    async getBlob(id) { try { const r = await tx('blobs', 'readonly', (s) => s.get(id)); return r ? r.data : null; } catch (e) { return null; } },
+    async save(g, blobs) {
+      let size = JSON.stringify(g).length;
+      for (const b of blobs) { await tx('blobs', 'readwrite', (s) => s.put(b)); size += b.data.length; }
+      await tx('guides', 'readwrite', (s) => s.put({ id: g.id, savedAt: Date.now(), guide: g, blobIds: blobs.map((b) => b.id), size }));
+      try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+    },
+    async remove(id) {
+      const rec = await tx('guides', 'readonly', (s) => s.get(id));
+      if (rec) for (const b of rec.blobIds || []) await tx('blobs', 'readwrite', (s) => s.delete(b));
+      await tx('guides', 'readwrite', (s) => s.delete(id));
+    }
+  };
+})();
+
 /* ---------- reading content from Firebase (with a saved copy on the phone) ---------- */
 const fbReady = new Promise((res) => {
   window.addEventListener('fb-ready', () => res(true));
@@ -177,35 +212,44 @@ function normGuide(id, d) {
   const hasIg = ig.some(Boolean);
   const lines = (o) => ({ en: (o && o.en) || [], ig: o && o.ig && o.ig.length ? o.ig : undefined });
   return {
-    id, ill: d.ill || 'books', order: d.order || 0,
+    id, ill: d.ill || 'books', order: d.order || 0, rev: d.rev || 0,
     title: d.title || {}, sub: d.sub || {}, summary: d.summary || {},
     updated: d.updated || '', cover: d.cover || null, thumb: d.thumb || null,
     steps: { en, ig: hasIg ? ig.map((x, i) => x || en[i]) : undefined },
     igPartial: hasIg && ig.some((x) => !x),
     stepImgs: st.map((s) => s.img || null),
+    stepAudioIg: st.map((s) => (s.audio && s.audio.ig) || null),
     callIf: lines(d.callIf), dont: lines(d.dont)
   };
 }
 const normUpdate = (d) => ({ id: d.id, date: d.date || '', title: d.title || {}, body: d.body || {} });
 
-function makeStore(key, fetchFn, normFn, fallback, sortFn) {
+function makeStore(key, fetchFn, normFn, fallback, sortFn, extraFallback) {
   let mem = null, inflight = null;
+  const st = { ok: null, err: null, at: null };
   const readCache = () => { try { const c = JSON.parse(localStorage.getItem(key) || 'null'); return Array.isArray(c) && c.length ? c : null; } catch (e) { return null; } };
   function refresh() {
     if (inflight) return inflight;
     inflight = (async () => {
-      let list = null, ok = false;
+      let list = null, ok = false, err = null;
       if (await fbAvailable()) {
-        try { const raw = await withTimeout(fetchFn(), 8000); ok = true; list = raw.map(normFn).sort(sortFn); } catch (e) {}
-      }
+        try { const raw = await withTimeout(fetchFn(), 12000); ok = true; list = raw.map(normFn).sort(sortFn); }
+        catch (e) { err = (e && (e.code || e.message)) || 'error'; }
+      } else err = 'offline';
+      st.ok = ok; st.err = ok ? null : err; st.at = Date.now();
       if (ok) {
         try { if (list.length) localStorage.setItem(key, JSON.stringify(list)); else localStorage.removeItem(key); } catch (e) {}
         if (!list.length) list = fallback;
-      } else list = readCache() || fallback;
+      } else {
+        list = readCache();
+        if (!list && extraFallback) { try { list = await extraFallback(); } catch (e) {} }
+        if (!list || !list.length) list = fallback;
+      }
       const first = mem === null;
       const changed = JSON.stringify(list) !== JSON.stringify(mem);
       mem = list;
       if (changed && !first) window.dispatchEvent(new Event('fl-data'));
+      window.dispatchEvent(new Event('fl-status'));
       return list;
     })().finally(() => { inflight = null; });
     return inflight;
@@ -214,30 +258,52 @@ function makeStore(key, fetchFn, normFn, fallback, sortFn) {
     async get() {
       if (mem) return mem;
       const c = readCache();
-      if (c) { mem = c; refresh(); return c; }   // show the saved copy now, refresh quietly
+      if (c) { mem = c; refresh(); return c; }   // show the saved copy now, check for news quietly
       return refresh();
     },
+    refresh,
+    status: () => st,
     invalidate() { mem = null; try { localStorage.removeItem(key); } catch (e) {} }
   };
 }
 
-const guidesStore = makeStore('fl_gcache', () => window.FB.listGuides(), (d) => normGuide(d.id, d), SAMPLE_GUIDES, (a, b) => (a.order || 0) - (b.order || 0));
-const updatesStore = makeStore('fl_ucache', () => window.FB.listUpdates(), normUpdate, SAMPLE_UPDATES, (a, b) => String(b.date).localeCompare(String(a.date)));
-const imageMem = {};
+const guidesStore = makeStore('fl_gcache', () => window.FB.listGuides(), (d) => normGuide(d.id, d), SAMPLE_GUIDES,
+  (a, b) => (a.order || 0) - (b.order || 0),
+  async () => (await OfflineStore.list()).map((r) => r.guide));
+const updatesStore = makeStore('fl_ucache', () => window.FB.listUpdates(), normUpdate, SAMPLE_UPDATES,
+  (a, b) => String(b.date).localeCompare(String(a.date)));
+const mediaMem = {};
+let lastRefresh = 0;
+
+// Pictures and audio: from the phone first (downloaded guides), then from Firebase.
+async function getMedia(kind, id) {
+  if (mediaMem[id]) return mediaMem[id];
+  const local = await OfflineStore.getBlob(id);
+  if (local) { mediaMem[id] = local; return local; }
+  if (!(await fbAvailable())) return null;
+  try {
+    const d = await withTimeout(kind === 'audio' ? window.FB.getAudio(id) : window.FB.getImage(id), 15000);
+    const ok = kind === 'audio' ? /^data:(audio|video)\//.test(d || '') : /^data:image\//.test(d || '');
+    if (typeof d === 'string' && ok) { mediaMem[id] = d; return d; }
+  } catch (e) {}
+  return null;
+}
 
 const DataService = {
   getGuides: () => guidesStore.get(),
   async getGuide(id) { const l = await guidesStore.get(); return l.find((g) => g.id === id) || null; },
   getUpdates: () => updatesStore.get(),
   async getProfile() { return SAMPLE_PROFILE; },
-  async getImage(id) {
-    if (imageMem[id]) return imageMem[id];
-    if (!(await fbAvailable())) return null;
-    try {
-      const d = await withTimeout(window.FB.getImage(id), 8000);
-      if (typeof d === 'string' && d.indexOf('data:image/') === 0) { imageMem[id] = d; return d; }
-    } catch (e) {}
-    return null;
+  getImage: (id) => getMedia('image', id),
+  getAudio: (id) => getMedia('audio', id),
+  // quietly look for newer content (at most every 8 seconds)
+  refreshSoon() {
+    const n = Date.now();
+    if (n - lastRefresh < 8000) return;
+    lastRefresh = n;
+    guidesStore.refresh(); updatesStore.refresh();
   },
+  async refreshNow() { lastRefresh = Date.now(); await Promise.all([guidesStore.refresh(), updatesStore.refresh()]); },
+  status(which) { return (which === 'updates' ? updatesStore : guidesStore).status(); },
   invalidate() { guidesStore.invalidate(); updatesStore.invalidate(); }
 };
