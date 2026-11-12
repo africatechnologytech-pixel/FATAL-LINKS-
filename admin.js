@@ -46,13 +46,15 @@
 
   /* ---------- dashboard + lists ---------- */
   async function dash() {
-    let g = [], u = [];
-    try { [g, u] = await Promise.all([FB().listGuides(), FB().listUpdates()]); } catch (e) {}
+    let g = [], u = [], fc = [];
+    try { [g, u, fc] = await Promise.all([FB().listGuides(), FB().listUpdates(), FB().listFacilities()]); } catch (e) {}
     return `
       <div class="pcard"><h2>Content manager</h2>
         <p class="meta">You are signed in as admin. Changes appear on every phone.</p>
         <a class="bigbtn link" href="#/admin/guides">Guides (${g.length})</a>
         <a class="secbtn" href="#/admin/updates">Latest updates (${u.length})</a>
+        <a class="secbtn" href="#/admin/facilities">Hospitals (${fc.length})</a>
+        ${fc.length === 0 ? `<button type="button" class="secbtn" data-ad="seedfac">Add the 4 sample hospitals</button>` : ''}
         ${g.length === 0 ? `<button type="button" class="secbtn" data-ad="seed">Add the sample guides and updates</button>
         <p class="hint">Starts you with the 5 sample guides, so you can edit them instead of typing from scratch.</p>` : ''}
       </div>`;
@@ -80,6 +82,18 @@
       <ul class="list" style="margin-top:12px">${u.map((x) => `
         <li><a class="row" href="#/admin/update/${esc(x.id)}"><span class="tx"><strong>${esc((x.title && x.title.en) || x.id)}</strong>
         <small>${esc(x.date || '')}</small></span>${icon('chevron')}</a></li>`).join('')}</ul>`;
+  }
+
+  async function facilitiesList() {
+    let l = [];
+    try { l = await FB().listFacilities(); } catch (e) { return '<p class="notice info">Could not load. Check your internet.</p>'; }
+    l.sort((a, b) => (a.order || 0) - (b.order || 0));
+    return `${back('#/admin', 'Content manager')}
+      <h2 class="sec">Hospitals</h2>
+      <a class="bigbtn link" href="#/admin/facility/new">+ Add new hospital</a>
+      <ul class="list" style="margin-top:12px">${l.map((x) => `
+        <li><a class="row" href="#/admin/facility/${esc(x.id)}"><span class="tx"><strong>${esc(x.name || x.id)}</strong>
+        <small>${esc(x.area || '')}</small></span>${icon('chevron')}</a></li>`).join('')}</ul>`;
   }
 
   /* ---------- small form helpers ---------- */
@@ -186,6 +200,10 @@
       ['callIf', 'dont'].forEach((k) => { draft[k] = { en: v(k + '_en'), ig: v(k + '_ig') }; });
       draft.order = Number(v('order')) || 0;
       draft.steps.forEach((s, i) => { s.text = { en: v('step_en_' + i), ig: v('step_ig_' + i) }; });
+    } else if (kind === 'facility') {
+      ['name', 'area', 'address', 'phone', 'hours', 'services', 'meds', 'checked', 'order', 'km', 'mapX', 'mapY'].forEach((k) => {
+        draft[k] = ['services', 'meds'].includes(k) ? v(k) : v(k).trim();
+      });
     } else if (kind === 'update') {
       draft.date = v('date') || todayISO();
       draft.title = { en: v('title_en').trim(), ig: v('title_ig').trim() };
@@ -207,7 +225,7 @@
   }
   function rerender() {
     const y = window.scrollY;
-    $('app').innerHTML = kind === 'guide' ? guideForm() : updateForm();
+    $('app').innerHTML = kind === 'guide' ? guideForm() : (kind === 'facility' ? facilityForm() : updateForm());
     hydratePreviews();
     window.scrollTo(0, y);
   }
@@ -243,6 +261,7 @@
       await FB().saveImage(id, data);
       previews[id] = data;
       if (which === 'cover') { draft.cover = id; draft.thumb = await shrink(file, 220, 0.6); }
+      else if (which === 'fac') { draft.pic = id; }
       else draft.steps[Number(i)].img = id;
       rerender();
     } catch (e) {
@@ -339,6 +358,73 @@
     } catch (e) { showErr('Could not delete. Check your internet.'); }
   }
 
+  /* ---------- hospital editor ---------- */
+  const emptyFac = (order) => ({ __id: 'new', order, name: '', area: '', address: '', phone: '', hours: '', services: '', meds: '',
+    checked: todayISO(), km: '', mapX: 50, mapY: 50, img: null, pic: null });
+  async function facilityEditor(id) {
+    if (!draft || kind !== 'facility' || draft.__id !== id) {
+      let list = [];
+      try { list = await FB().listFacilities(); } catch (e) { return '<p class="notice info">Could not load. Check your internet.</p>'; }
+      if (id === 'new') draft = emptyFac(list.length + 1);
+      else {
+        const d = list.find((x) => x.id === id);
+        if (!d) return '<div class="ph"><h2>Hospital not found</h2></div>' + back('#/admin/facilities', 'Hospitals');
+        draft = { __id: id, order: d.order || 0, name: d.name || '', area: d.area || '', address: d.address || '', phone: d.phone || '',
+          hours: d.hours || '', services: (d.services || []).join('\n'), meds: (d.meds || []).join('\n'), checked: d.checked || todayISO(),
+          km: d.km == null ? '' : d.km, mapX: d.mapX == null ? 50 : d.mapX, mapY: d.mapY == null ? 50 : d.mapY, img: d.img || null, pic: d.pic || null };
+      }
+      kind = 'facility';
+    }
+    return facilityForm();
+  }
+  function facilityForm() {
+    const d = draft;
+    return `${back('#/admin/facilities', 'Hospitals')}
+      <form id="adform" data-adform="facility" novalidate>
+        <div class="pcard"><h2>${d.__id === 'new' ? 'New hospital' : 'Edit hospital'}</h2>
+          ${field('name', 'Name', d.name)}
+          ${field('area', 'Area (for example Rayfield, Jos)', d.area)}
+          ${field('address', 'Address', d.address)}
+          ${field('phone', 'Phone number', d.phone, { type: 'tel' })}
+          ${field('hours', 'Opening hours', d.hours)}
+          ${field('services', 'Services (one per line)', d.services, { area: true, rows: 4 })}
+          ${field('meds', 'Medicines reported to be offered (one per line)', d.meds, { area: true, rows: 4 })}
+          ${field('checked', 'Date you last checked this information', d.checked, { type: 'date' })}
+          ${field('order', 'Position in the list (1 = first)', d.order, { type: 'number' })}
+        </div>
+        <div class="pcard"><h2>Picture</h2>${imgBox('fac', 0, d.pic || null)}
+          ${!d.pic && d.img ? '<p class="meta">Currently using the built-in sample picture. Tap the box to replace it.</p>' : ''}</div>
+        <div class="pcard"><h2>Demo map and distance</h2>
+          <p class="meta">Map pin: 0 is the left or top edge, 100 is the right or bottom edge. The distance is a sample number for the demo.</p>
+          ${field('mapX', 'Map pin: across (0 to 100)', d.mapX, { type: 'number' })}
+          ${field('mapY', 'Map pin: down (0 to 100)', d.mapY, { type: 'number' })}
+          ${field('km', 'Sample distance in km', d.km, { type: 'number' })}
+        </div>
+        <p id="aderr" class="err" role="alert" hidden></p>
+        <button class="bigbtn" type="submit">Save hospital</button>
+        ${d.__id !== 'new' ? '<button type="button" class="secbtn danger" data-ad="delfac">Delete this hospital</button>' : ''}
+      </form>`;
+  }
+  async function saveFacility() {
+    collect();
+    const d = draft;
+    if (!d.name) return showErr('Please enter the hospital name.');
+    const num = (v, lo, hi, dflt) => { const n = Number(v); return v === '' || isNaN(n) ? dflt : Math.min(hi, Math.max(lo, n)); };
+    const id = d.__id === 'new' ? slug(d.name) + '-' + Math.random().toString(36).slice(2, 6) : d.__id;
+    const doc = {
+      order: Number(d.order) || 0, name: d.name, area: d.area, address: d.address, phone: d.phone, hours: d.hours,
+      services: lines(d.services), meds: lines(d.meds), checked: d.checked || todayISO(),
+      km: d.km === '' ? null : num(d.km, 0, 9999, null), mapX: num(d.mapX, 0, 100, 50), mapY: num(d.mapY, 0, 100, 50),
+      img: d.img || null, pic: d.pic || null, demo: true
+    };
+    try {
+      await FB().saveFacility(id, doc);
+      DataService.invalidate();
+      draft = null;
+      location.hash = '#/admin/facilities';
+    } catch (e) { showErr('Could not save. Check your internet and that this account is an admin.'); }
+  }
+
   /* ---------- update editor ---------- */
   async function updateEditor(id) {
     if (!draft || kind !== 'update' || draft.__id !== id) {
@@ -394,6 +480,12 @@
     catch (e) { alert('Could not add the samples. Check your internet and that this account is an admin.'); }
   }
 
+  async function seedFacilities() {
+    if (!confirm('Add the 4 sample hospitals?')) return;
+    try { await FB().seedFacilities(SAMPLE_FACILITIES.map((f) => [f.id, Object.assign({}, f, { demo: true })])); DataService.invalidate(); FL.rerender(); }
+    catch (e) { alert('Could not add the hospitals. Check your internet and that the new rules are published.'); }
+  }
+
   /* ---------- events (set up once) ---------- */
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-ad]');
@@ -416,11 +508,18 @@
     }
     else if (a === 'rmimg') {
       collect();
-      if (b.getAttribute('data-which') === 'cover') { draft.cover = null; draft.thumb = null; } else draft.steps[i].img = null;
+      const w = b.getAttribute('data-which');
+      if (w === 'cover') { draft.cover = null; draft.thumb = null; } else if (w === 'fac') { draft.pic = null; draft.img = null; } else draft.steps[i].img = null;
       rerender();
     }
     else if (a === 'rec') toggleRecord(i, b);
     else if (a === 'rmaudio') { collect(); draft.steps[i].audio = null; rerender(); }
+    else if (a === 'seedfac') seedFacilities();
+    else if (a === 'delfac') {
+      if (!draft || !confirm('Delete this hospital for everyone?')) return;
+      const pic = draft.pic;
+      FB().deleteFacility(draft.__id).then(() => { if (pic) FB().deleteImage(pic).catch(() => {}); DataService.invalidate(); draft = null; location.hash = '#/admin/facilities'; }).catch(() => showErr('Could not delete.'));
+    }
     else if (a === 'delguide') deleteGuide();
     else if (a === 'delupdate') {
       if (!draft || !confirm('Delete this update for everyone?')) return;
@@ -443,7 +542,8 @@
     const f = e.target;
     if (!f.matches || !f.matches('[data-adform]')) return;
     e.preventDefault();
-    if (f.getAttribute('data-adform') === 'guide') saveGuide(); else saveUpdate();
+    const w = f.getAttribute('data-adform');
+    if (w === 'guide') saveGuide(); else if (w === 'facility') saveFacility(); else saveUpdate();
   });
 
   /* ---------- entry point used by the router ---------- */
@@ -451,13 +551,15 @@
     const blocked = await gate();
     if (blocked) return blocked;
     const sub = parts[0] || '', arg = decodeURIComponent(parts.slice(1).join('/') || '');
-    if (sub !== 'guide' && sub !== 'update') { draft = null; kind = null; }
+    if (sub !== 'guide' && sub !== 'update' && sub !== 'facility') { draft = null; kind = null; }
     let html;
     if (sub === '') html = await dash();
     else if (sub === 'guides') html = await guidesList();
     else if (sub === 'guide') html = await guideEditor(arg);
     else if (sub === 'updates') html = await updatesList();
     else if (sub === 'update') html = await updateEditor(arg);
+    else if (sub === 'facilities') html = await facilitiesList();
+    else if (sub === 'facility') html = await facilityEditor(arg);
     else html = await dash();
     setTimeout(hydratePreviews, 0);
     return html;

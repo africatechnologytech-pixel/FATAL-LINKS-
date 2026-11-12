@@ -157,6 +157,91 @@ const SAMPLE_PROFILE = {
 };
 
 
+// Demo hospitals in Jos, Plateau State. Names, phone numbers and distances are MADE UP.
+// km = sample distance for the "Near me" demo. mapX / mapY = pin position on jos-map.jpg (percent).
+const SAMPLE_FACILITIES = [
+  { id: 'rayfield', order: 1, name: 'Sample Rayfield Hospital', area: 'Rayfield, Jos', address: '12 Sample Road, Rayfield',
+    phone: '+234 000 000 0001', hours: 'Open 24 hours', img: 'hospital-1.jpg', km: 1.2, mapX: 24, mapY: 52,
+    services: ['Emergency', 'Maternity', 'Children', 'Pharmacy'],
+    meds: ['Paracetamol', 'Oral rehydration salts', 'Insulin'], checked: '2026-11-10' },
+  { id: 'terminus', order: 2, name: 'Sample Terminus Hospital', area: 'Terminus, Jos', address: '5 Demo Street, Terminus',
+    phone: '+234 000 000 0002', hours: 'Open 24 hours', img: 'hospital-2.jpg', km: 2.8, mapX: 53, mapY: 47,
+    services: ['Emergency', 'Snakebite treatment', 'Surgery'],
+    meds: ['Anti-snake venom', 'Tetanus vaccine', 'Pain relief'], checked: '2026-11-10' },
+  { id: 'josnorth', order: 3, name: 'Sample Jos North Hospital', area: 'Jos North', address: '8 Example Avenue, Jos North',
+    phone: '+234 000 000 0003', hours: '7am to 9pm daily', img: 'hospital-3.jpg', km: 4.5, mapX: 38, mapY: 25,
+    services: ['Maternity', 'Children', 'Vaccinations', 'Malaria clinic'],
+    meds: ['Oral rehydration salts', 'Malaria treatment', 'Childhood vaccines'], checked: '2026-11-10' },
+  { id: 'bukuru', order: 4, name: 'Sample Bukuru Hospital', area: 'Bukuru, Jos South', address: '21 Test Close, Bukuru',
+    phone: '+234 000 000 0004', hours: 'Open 24 hours', img: 'hospital-4.jpg', km: 7.0, mapX: 56, mapY: 76,
+    services: ['Emergency', 'Burns care', 'Accident and trauma', 'Eye clinic'],
+    meds: ['Burn dressings', 'Antibiotics', 'Pain relief'], checked: '2026-11-10' }
+];
+
+/* ---------- smart search: understands everyday words (works offline, no AI service) ---------- */
+const SmartSearch = (() => {
+  const STOP = new Set(('a an the and or of to in on at is are was was were be am i my me we our you your he she him her his its it this that with for from has have had do does did how what when where why please someone person people friend can could should would just very so need needs want find looking').split(' '));
+  const low = (x) => String(x || '').toLowerCase();
+  const tokens = (q) => low(q).replace(/'/g, '').replace(/[^\p{L}\p{N} ]+/gu, ' ').split(/\s+/).filter((w) => w && !STOP.has(w));
+  const hit = (toks, qn, phrases) => phrases.some((p) => p.includes(' ')
+    ? qn.includes(p)
+    : toks.some((t) => t === p || (t.length >= 4 && p.length >= 4 && (p.startsWith(t) || t.startsWith(p)))));
+
+  // everyday words people use in an emergency -> which guide they mean
+  const GUIDE_WORDS = {
+    seizure: ['shaking', 'shake', 'fit', 'fits', 'convulsion', 'convulsions', 'convulsing', 'epilepsy', 'epileptic', 'jerking', 'foaming', 'seizing', 'fell down', 'fall down'],
+    cpr: ['heart', 'cardiac', 'not breathing', 'stopped breathing', 'unconscious', 'unresponsive', 'collapsed', 'collapse', 'pulse', 'arrest', 'drowned', 'drowning', 'wont wake', 'not waking'],
+    choking: ['choke', 'chokes', 'choked', 'cant breathe', 'cannot breathe', 'swallowed', 'stuck', 'throat', 'gagging', 'bone', 'food stuck'],
+    bleeding: ['blood', 'bleed', 'bleeding', 'cut', 'wound', 'stab', 'stabbed', 'gunshot', 'injury', 'knife', 'accident', 'gash'],
+    burns: ['burn', 'burnt', 'burned', 'scald', 'scalded', 'fire', 'hot water', 'boiling', 'flame', 'hot oil', 'steam'],
+    poisoning: ['poison', 'poisoned', 'swallowed medicine', 'overdose', 'chemical', 'kerosene', 'pesticide'],
+    snakebite: ['snake', 'snakebite', 'bitten', 'cobra', 'viper', 'venom']
+  };
+  // everyday words -> words found on hospital cards
+  const FAC_WORDS = [
+    { w: ['snake', 'snakebite', 'bitten', 'venom', 'cobra', 'viper'], m: ['snake', 'venom'] },
+    { w: ['pregnant', 'pregnancy', 'labour', 'labor', 'delivery', 'birth', 'maternity', 'antenatal'], m: ['maternity'] },
+    { w: ['child', 'children', 'kid', 'kids', 'infant', 'baby', 'paediatric', 'pediatric'], m: ['children', 'childhood'] },
+    { w: ['accident', 'crash', 'emergency', 'bleeding', 'unconscious', 'collapsed', 'trauma', 'injury', 'injured', 'stab', 'gunshot'], m: ['emergency', 'trauma'] },
+    { w: ['burn', 'burns', 'burnt', 'scald', 'fire'], m: ['burn'] },
+    { w: ['diabetes', 'diabetic', 'insulin', 'sugar'], m: ['insulin'] },
+    { w: ['malaria', 'fever'], m: ['malaria'] },
+    { w: ['eye', 'eyes', 'sight', 'vision'], m: ['eye'] },
+    { w: ['vaccine', 'vaccines', 'vaccination', 'immunisation', 'immunization', 'tetanus'], m: ['vaccin', 'tetanus'] },
+    { w: ['tablet', 'tablets', 'drug', 'drugs', 'medicine', 'medicines', 'pharmacy', 'pills'], m: ['pharmacy'] }
+  ];
+
+  return {
+    tokens,
+    guides(list, q, lang) {
+      const toks = tokens(q);
+      if (!toks.length) return list;
+      const qn = ' ' + toks.join(' ') + ' ';
+      const L = (o) => low((o && (o[lang] || o.en)) || '');
+      return list.map((g) => {
+        const title = L(g.title), sub = L(g.sub), sum = L(g.summary), steps = low((g.steps[lang] || g.steps.en).join(' '));
+        let s = 0;
+        toks.forEach((w) => { if (title.includes(w)) s += 3; if (sub.includes(w)) s += 2; if (sum.includes(w)) s += 2; if (steps.includes(w)) s += 1; });
+        if (GUIDE_WORDS[g.id] && hit(toks, qn, GUIDE_WORDS[g.id])) s += 5;
+        return { g, s };
+      }).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.g);
+    },
+    facilities(list, q) {
+      const toks = tokens(q);
+      if (!toks.length) return list;
+      const qn = ' ' + toks.join(' ') + ' ';
+      return list.map((f) => {
+        const name = low(f.name), area = low(f.area), addr = low(f.address);
+        const svc = low((f.services || []).join(' ')), meds = low((f.meds || []).join(' '));
+        let s = 0;
+        toks.forEach((w) => { if (name.includes(w)) s += 4; if (area.includes(w)) s += 3; if (addr.includes(w)) s += 2; if (svc.includes(w)) s += 4; if (meds.includes(w)) s += 4; });
+        FAC_WORDS.forEach((grp) => { if (hit(toks, qn, grp.w) && grp.m.some((m) => (svc + ' ' + meds).includes(m))) s += 5; });
+        return { f, s };
+      }).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.f);
+    }
+  };
+})();
+
 /* ---------- guides saved on the phone for offline use (IndexedDB) ---------- */
 const OfflineStore = (() => {
   let dbp = null;
@@ -272,6 +357,14 @@ const guidesStore = makeStore('fl_gcache', () => window.FB.listGuides(), (d) => 
   async () => (await OfflineStore.list()).map((r) => r.guide));
 const updatesStore = makeStore('fl_ucache', () => window.FB.listUpdates(), normUpdate, SAMPLE_UPDATES,
   (a, b) => String(b.date).localeCompare(String(a.date)));
+const normFacility = (d) => ({
+  id: d.id, order: d.order || 0, name: d.name || '', area: d.area || '', address: d.address || '',
+  phone: d.phone || '', hours: d.hours || '', img: d.img || null, pic: d.pic || null,
+  km: typeof d.km === 'number' ? d.km : null, mapX: typeof d.mapX === 'number' ? d.mapX : 50, mapY: typeof d.mapY === 'number' ? d.mapY : 50,
+  services: d.services || [], meds: d.meds || [], checked: d.checked || ''
+});
+const facilitiesStore = makeStore('fl_fccache', () => window.FB.listFacilities(), normFacility, SAMPLE_FACILITIES,
+  (a, b) => (a.order || 0) - (b.order || 0));
 const mediaMem = {};
 let lastRefresh = 0;
 
@@ -293,6 +386,7 @@ const DataService = {
   getGuides: () => guidesStore.get(),
   async getGuide(id) { const l = await guidesStore.get(); return l.find((g) => g.id === id) || null; },
   getUpdates: () => updatesStore.get(),
+  getFacilities: () => facilitiesStore.get(),
   async getProfile() { return SAMPLE_PROFILE; },
   getImage: (id) => getMedia('image', id),
   getAudio: (id) => getMedia('audio', id),
@@ -301,9 +395,9 @@ const DataService = {
     const n = Date.now();
     if (n - lastRefresh < 8000) return;
     lastRefresh = n;
-    guidesStore.refresh(); updatesStore.refresh();
+    guidesStore.refresh(); updatesStore.refresh(); facilitiesStore.refresh();
   },
-  async refreshNow() { lastRefresh = Date.now(); await Promise.all([guidesStore.refresh(), updatesStore.refresh()]); },
+  async refreshNow() { lastRefresh = Date.now(); await Promise.all([guidesStore.refresh(), updatesStore.refresh(), facilitiesStore.refresh()]); },
   status(which) { return (which === 'updates' ? updatesStore : guidesStore).status(); },
-  invalidate() { guidesStore.invalidate(); updatesStore.invalidate(); }
+  invalidate() { guidesStore.invalidate(); updatesStore.invalidate(); facilitiesStore.invalidate(); }
 };

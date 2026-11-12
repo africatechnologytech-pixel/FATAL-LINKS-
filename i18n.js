@@ -102,6 +102,24 @@ const I18N = {
     dlFail: 'Could not download. Check your internet and try again.',
     checking: 'Checking for news...', checkedNow: 'Up to date. Checked just now.',
     savedCopy: 'Could not reach the server. Showing the copy saved on this phone', refresh: 'Refresh',
+    findTitle: 'Find Healthcare', findSub: 'Hospitals, services and medicines', findHospital: 'Find a hospital',
+    facSearchPh: 'Hospital, service or medicine...', nearMe: 'Near me', listView: 'List', mapView: 'Map',
+    nearNote: 'Sample distances for the demo. The real app will use your phone\'s location, with your permission.',
+    facDemo: 'Demo hospitals. Names, phone numbers and distances are made up. Always call to confirm services and medicines.',
+    services: 'Services', medsReported: 'Reported to offer', checkedOn: 'Checked',
+    callConfirm: 'Call to confirm. Do not rely on this list for stock.',
+    callBtn: 'Call', showOnMap: 'Show on map', noFac: 'No matching hospitals. Try another word.',
+    sampleKm: 'sample distance', sampleMap: 'Sample map of Jos, not to scale.',
+    chipEmergency: 'Emergency', chipSnake: 'Snakebite', chipMaternity: 'Maternity', chipChildren: 'Children', chipBurns: 'Burns',
+    privacyTitle: 'Privacy Notice', createAgree: 'By creating an account you agree to the',
+    privacyItems: [
+      { h: 'What we keep', p: 'If you create an account we keep your email and the emergency details you type: name, age, blood group, allergies, conditions, medications and an emergency contact.' },
+      { h: 'Who can see it', p: 'Only you can see your full profile. If you make a wristband QR code, anyone who scans it can see ONLY the details you marked Shared. They do not need an account or this app.' },
+      { h: 'Your choices', p: 'You can change what is shared at any time by editing your profile. You can make a new QR code (the old one stops working) or switch the QR code off.' },
+      { h: 'On your phone', p: 'The app keeps a copy of your profile and any guides you download on your phone, so they work without internet. Signing out removes the copy of your profile.' },
+      { h: 'Not a medical service', p: 'FATAL LINKS gives general first aid information. This is a demo and has not been reviewed by a doctor. It does not replace emergency services (call 112), first aid training or medical care.' },
+      { h: 'Deleting your data', p: 'Deleting an account is not available in this demo yet. Ask the FATAL LINKS team and they will remove your data.' }
+    ],
     notFound: 'Page not found', notFoundText: 'That page does not exist.', goHome: 'Go to Home'
   },
 
@@ -140,6 +158,8 @@ const I18N = {
     save: 'Chekwa', cancel: 'Kagbuo', fullName: 'Aha zuru ezu', age: 'Afọ',
     qrTitle: 'QR Koodu Mgbaaka Aka', scanStart: 'Malite igwefoto', emgTitle: 'Ozi Mberede',
     listen: 'Gee ntị',
+    findTitle: 'Chọta Ụlọ Ọgwụ', nearMe: 'Dị nso m', listView: 'Ndepụta', mapView: 'Maapụ', callBtn: 'Kpọọ',
+    privacyTitle: 'Ọkwa Nzuzo',
     goHome: 'Gaa n\'Ụlọ'
   }
 };

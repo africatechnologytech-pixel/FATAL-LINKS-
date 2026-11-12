@@ -47,6 +47,8 @@
     plus: '<path d="M12 5v14M5 12h14"/>',
     check: '<circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-6"/>',
     pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+    pin: '<path d="M12 21s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
+    hospital: '<path d="M4 21V8l8-4 8 4v13"/><path d="M9 21v-5h6v5"/><path d="M12 8.5v4M10 10.5h4"/>',
     mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
     trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
     drop: '<path d="M12 3C8 9 6 12 6 15a6 6 0 0 0 12 0c0-3-2-6-6-12z"/>',
@@ -79,7 +81,9 @@
     offline: { title: 'offTitle', back: '#/' },
     updates: { title: 'updatesTitle', back: '#/' },
     e: { title: 'emgTitle', back: '#/' },
-    admin: { title: 'adminTitle', back: '#/profile' }
+    admin: { title: 'adminTitle', back: '#/profile' },
+    facilities: { title: 'findTitle', back: '#/' },
+    privacy: { title: 'privacyTitle', back: '#/' }
   };
 
   function renderChrome(name) {
@@ -110,7 +114,7 @@
         </div>`;
     }
 
-    const active = { home: 'home', library: 'guides', search: 'guides', guide: 'guides', scan: 'scan', profile: 'profile', 'emergency-profile': 'profile', 'profile-edit': 'profile', admin: 'profile', offline: 'offline' }[name];
+    const active = { home: 'home', library: 'guides', search: 'guides', guide: 'guides', scan: 'scan', profile: 'profile', 'emergency-profile': 'profile', 'profile-edit': 'profile', admin: 'profile', facilities: 'home', privacy: 'profile', offline: 'offline' }[name];
     const items = [
       ['home', '#/', 'home', 'navHome'],
       ['guides', '#/library', 'book', 'navGuides'],
@@ -140,7 +144,9 @@
           <button type="button" class="iconbtn" data-action="close" aria-label="${t('close')}">${icon('close')}</button></div>
         <h2>${t('language')}</h2>
         ${langButtons()}
+        <a class="menulink" href="#/facilities" data-action="close">${icon('hospital')}<span>${t('findTitle')}</span></a>
         <a class="menulink" href="#/updates" data-action="close">${icon('bell')}<span>${t('latest')}</span></a>
+        <a class="menulink" href="#/privacy" data-action="close">${icon('check')}<span>${t('privacyTitle')}</span></a>
         ${installEvent ? `<button type="button" class="menulink" data-action="install">${icon('download')}<span>${t('installApp')}</span></button>` : ''}
         <a class="menulink" href="check.html">${icon('check')}<span>${t('installHelp')}</span></a>
         <p class="about">${t('aboutText')}</p>
@@ -154,20 +160,14 @@
   const sosBar = () =>
     `<a class="sos" href="tel:112">${icon('phone')}<span><strong>${t('sosTitle')}</strong><small>${t('sosSub')}</small></span></a>`;
 
-  const matches = (g, q) => {
-    if (!q) return true;
-    const hay = [locRaw(g.title), locRaw(g.sub), locRaw(g.summary), (g.steps[lang] || g.steps.en).join(' ')].join(' ').toLowerCase();
-    return q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
-  };
-
   const thumbHtml = (g) =>
     g.thumb && String(g.thumb).indexOf('data:image/') === 0
       ? `<img src="${esc(g.thumb)}" alt="">`
       : (ILL[g.ill] || ILL.books);
 
   const guideRows = (guides, q) => {
-    const list = guides.filter((g) => matches(g, q));
-    if (!list.length) return `<p class="empty">${t('noResults')}</p>`;
+    const list = q ? SmartSearch.guides(guides, q, lang) : guides;
+    if (!list.length) return `<p class="empty">${t('noResults')} <a href="#/facilities">${t('findHospital')}</a></p>`;
     return `<ul class="list">${list.map((g) => `
       <li><a class="row" href="#/guide/${g.id}">
         <span class="thumb">${thumbHtml(g)}</span>
@@ -184,7 +184,7 @@
   async function homeView() {
     return `
       <div class="logo-wrap"><img class="logo-circle" src="logo.png" alt="FATAL LINKS"></div>
-      <p class="tagline">${t('tagline')}</p>
+      <h1 class="tagline">${t('tagline')}</h1>
       ${searchBox('', 'homeq')}
       ${sosBar()}
       <div class="grid">
@@ -193,6 +193,7 @@
         <a class="tile prof" href="#/profile">${icon('user', 'big')}<strong>${t('tileProfile')}</strong><small>${t('tileProfileSub')}</small>${icon('chevron', 'chev')}</a>
         <a class="tile off" href="#/offline">${icon('download', 'big')}<strong>${t('tileOffline')}</strong><small>${t('tileOfflineSub')}</small>${icon('chevron', 'chev')}</a>
       </div>
+      <a class="uprow" href="#/facilities"><span class="ic">${icon('hospital')}</span><span class="tx"><strong>${t('findTitle')}</strong><small>${t('findSub')}</small></span>${icon('chevron')}</a>
       <a class="uprow" href="#/updates"><span class="ic">${icon('bell')}</span><span class="tx"><strong>${t('latest')}</strong><small id="uptitle"></small></span>${icon('chevron')}</a>`;
   }
 
@@ -229,7 +230,8 @@
         <div class="wr">${icon('plus')}<div><strong>${t('seekHelp')}</strong><ul>${li(g.callIf)}</ul></div></div>
       </section>
       <p class="source">${t('notReviewed')}</p>
-      ${sosBar()}`;
+      ${sosBar()}
+      <a class="secbtn" href="#/facilities">${icon('hospital')}<span>${t('findHospital')}</span></a>`;
   }
 
   const FIELDS = [
@@ -296,7 +298,7 @@
           <p id="autherr" class="err" role="alert" hidden></p>
           <button class="bigbtn" type="submit">${up ? t('createAcct') : t('signInBtn')}</button>
         </form>
-        ${up ? '' : `<button type="button" class="linkbtn" data-action="forgot">${t('forgot')}</button>`}
+        ${up ? `<p class="hint">${t('createAgree')} <a href="#/privacy">${t('privacyTitle')}</a></p>` : `<button type="button" class="linkbtn" data-action="forgot">${t('forgot')}</button>`}
         <p class="hint">${t('passHint')}</p>
       </div>`;
   }
@@ -672,7 +674,7 @@
     const ups = await DataService.getUpdates();
     return `
       <p class="lead">${t('updatesIntro')}</p>
-      <p class="statusline"><span id="datastatus">${esc(statusText('updates'))}</span>
+      <p class="statusline"><span id="datastatus" role="status">${esc(statusText('updates'))}</span>
         <button type="button" class="linkbtn inline" data-action="refreshdata">${t('refresh')}</button></p>
       <ul class="list">
         ${ups.map((u) => `<li class="upd"><small>${fmtDate(u.date)}</small><strong>${loc(u.title)}</strong><p>${loc(u.body)}</p></li>`).join('')}
@@ -683,12 +685,94 @@
     return `<div class="ph"><h2>${t('notFound')}</h2><p>${t('notFoundText')}</p><a class="bigbtn link" href="#/">${t('goHome')}</a></div>`;
   }
 
+  /* ---------- find healthcare: hospitals, services, medicines ---------- */
+  const fac = { q: '', near: false, view: 'list', sel: null };
+  const FAC_COLORS = ['#1E5FE0', '#6B4FD8', '#15803D', '#C2570C'];
+
+  const facPic = (f) => f.pic
+    ? `<div class="facimg"><img data-img="${esc(f.pic)}" alt=""></div>`
+    : (f.img ? `<div class="facimg"><img src="${esc(f.img)}" alt=""></div>` : '');
+
+  const facCard = (f, showDist) => `
+    <article class="faccard">
+      ${facPic(f)}
+      <div class="facinfo">
+        <h3>${esc(f.name)} <span class="pill">${t('sample')}</span></h3>
+        <p class="meta">${esc(f.area)}${f.address ? ' &middot; ' + esc(f.address) : ''}</p>
+        ${showDist && f.km != null ? `<p class="dist"><strong>${Number(f.km).toFixed(1)} km</strong> <small>(${t('sampleKm')})</small></p>` : ''}
+        ${f.hours ? `<p class="meta">${esc(f.hours)}</p>` : ''}
+        <div class="tags" aria-label="${t('services')}">${f.services.map((x) => `<span class="tag">${esc(x)}</span>`).join('')}</div>
+        ${f.meds.length ? `<p class="meds"><strong>${t('medsReported')}:</strong> ${f.meds.map(esc).join(', ')}<br>
+          <small>${t('checkedOn')} ${f.checked ? fmtDate(f.checked) : '-'}. ${t('callConfirm')}</small></p>` : ''}
+        <div class="facbtns">
+          <a class="bigbtn callb" href="tel:${esc(String(f.phone).replace(/[^+\d]/g, ''))}">${icon('phone')}<span>${t('callBtn')} ${esc(f.phone)}</span></a>
+          <button type="button" class="secbtn" data-action="facmap" data-id="${esc(f.id)}">${icon('pin')}<span>${t('showOnMap')}</span></button>
+        </div>
+      </div>
+    </article>`;
+
+  function facBody(all) {
+    let res = fac.q ? SmartSearch.facilities(all, fac.q) : all.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+    if (fac.near) res = res.slice().sort((a, b) => (a.km == null ? 999 : a.km) - (b.km == null ? 999 : b.km));
+    if (!res.length) return `<p class="empty">${t('noFac')}</p>`;
+    if (fac.view === 'map') {
+      const sel = res.find((f) => f.id === fac.sel) || res[0];
+      return `
+        <div class="mapwrap">
+          <img src="jos-map.jpg" alt="${t('sampleMap')}">
+          ${res.map((f) => `<button type="button" class="pin ${f.id === sel.id ? 'on' : ''}" style="left:${Number(f.mapX)}%;top:${Number(f.mapY)}%;background:${FAC_COLORS[all.indexOf(f) % 4]}"
+            data-action="facpin" data-id="${esc(f.id)}" aria-label="${esc(f.name)}" aria-pressed="${f.id === sel.id}">${all.indexOf(f) + 1}</button>`).join('')}
+        </div>
+        <p class="hint">${t('sampleMap')}</p>
+        ${facCard(sel, fac.near)}`;
+    }
+    return res.map((f) => facCard(f, fac.near)).join('');
+  }
+
+  async function facilitiesView() {
+    const all = await DataService.getFacilities();
+    const chips = [['chipEmergency', 'Emergency'], ['chipSnake', 'Snakebite'], ['chipMaternity', 'Maternity'], ['chipChildren', 'Children'], ['chipBurns', 'Burns']];
+    return `
+      <p class="notice">${t('facDemo')}</p>
+      <form class="search" data-facsearch role="search">
+        ${icon('search')}
+        <input type="search" id="facq" value="${esc(fac.q)}" placeholder="${t('facSearchPh')}" aria-label="${t('facSearchPh')}" enterkeyhint="search" autocomplete="off">
+      </form>
+      <div class="chips">${chips.map(([k, q]) => `<button type="button" class="chipbtn" data-action="facchip" data-q="${q}">${t(k)}</button>`).join('')}</div>
+      <div class="facctl">
+        <button type="button" class="nearbtn ${fac.near ? 'on' : ''}" data-action="facnear" aria-pressed="${fac.near}">${icon('pin')}<span>${t('nearMe')}</span></button>
+        <div class="seg2" role="group" aria-label="View">
+          <button type="button" data-action="facview" data-v="list" aria-pressed="${fac.view === 'list'}">${t('listView')}</button>
+          <button type="button" data-action="facview" data-v="map" aria-pressed="${fac.view === 'map'}">${t('mapView')}</button>
+        </div>
+      </div>
+      ${fac.near ? `<p class="hint">${t('nearNote')}</p>` : ''}
+      <div id="facbody">${facBody(all)}</div>`;
+  }
+
+  async function redrawFac() {
+    const y = window.scrollY;
+    app.innerHTML = await facilitiesView();
+    hydrate();
+    window.scrollTo(0, y);
+  }
+
+  async function privacyView() {
+    const items = t('privacyItems');
+    return `<div class="pcard">${items.map((it) => `<h2>${esc(it.h)}</h2><p class="privp">${esc(it.p)}</p>`).join('')}</div>
+      <p class="source">${t('notReviewed')}</p>`;
+  }
+
   /* ---------- read aloud: English = the phone's voice, Igbo = your recorded clips ---------- */
   let audioEl = null, audioQueue = [], speechToken = 0, playingStep = -1;
   const hasIgAudio = (g) => !!(g && g.stepAudioIg && g.stepAudioIg.some(Boolean));
 
   function highlight(i) {
-    document.querySelectorAll('.steps li').forEach((li, k) => li.classList.toggle('playing', k === i));
+    document.querySelectorAll('.steps li').forEach((li, k) => {
+      li.classList.toggle('playing', k === i);
+      const b = li.querySelector('.listen');
+      if (b) b.setAttribute('aria-pressed', k === i ? 'true' : 'false');
+    });
   }
   function setReadUI() {
     document.querySelectorAll('[data-action="read"]').forEach((b) => {
@@ -810,6 +894,7 @@
   }
 
   /* ---------- router ---------- */
+  let navFocus = false;
   async function render() {
     stopSpeech();
     stopScan();
@@ -832,14 +917,18 @@
       case 'profile-edit': html = await profileEditView(); break;
       case 'offline': html = await offlineView(); break;
       case 'updates': html = await updatesView(); break;
+      case 'facilities': html = await facilitiesView(); break;
+      case 'privacy': html = await privacyView(); break;
       default: html = notFoundView();
     }
     app.innerHTML = html;
     app.className = 'main ' + name;
     hydrate();
     if (name === 'guide') updateReadButtons();
-    if (['home', 'library', 'search', 'updates', 'offline'].includes(name)) DataService.refreshSoon();
+    if (['home', 'library', 'search', 'updates', 'offline', 'facilities'].includes(name)) DataService.refreshSoon();
+    document.title = (PAGE[name] ? t(PAGE[name].title) + ' - ' : '') + 'FATAL LINKS';
     window.scrollTo(0, 0);
+    if (navFocus) { navFocus = false; app.focus({ preventScroll: true }); }   // so screen readers announce the new page
   }
 
   /* ---------- events ---------- */
@@ -858,6 +947,11 @@
       else if (a === 'close') closeDrawer();
       else if (a === 'read') readGuide();
       else if (a === 'playstep') playStep(Number(act.getAttribute('data-i')));
+      else if (a === 'facchip') { fac.q = act.getAttribute('data-q'); redrawFac(); }
+      else if (a === 'facnear') { fac.near = !fac.near; redrawFac(); }
+      else if (a === 'facview') { fac.view = act.getAttribute('data-v'); redrawFac(); }
+      else if (a === 'facpin') { fac.sel = act.getAttribute('data-id'); redrawFac(); }
+      else if (a === 'facmap') { fac.view = 'map'; fac.sel = act.getAttribute('data-id'); redrawFac(); window.scrollTo(0, 0); }
       else if (a === 'refreshdata') {
         const el = document.getElementById('datastatus');
         if (el) el.textContent = t('checking');
@@ -887,7 +981,8 @@
 
   document.addEventListener('submit', async (e) => {
     const f = e.target;
-    if (f.matches('[data-search]')) {
+    if (f.matches('[data-facsearch]')) { e.preventDefault(); const i = f.querySelector('input'); if (i) i.blur(); }
+    else if (f.matches('[data-search]')) {
       e.preventDefault();
       const q = f.querySelector('input').value.trim();
       location.hash = q ? '#/search/' + encodeURIComponent(q) : '#/library';
@@ -897,6 +992,13 @@
 
   // live filtering while typing on the guides page
   document.addEventListener('input', async (e) => {
+    if (e.target.id === 'facq') {
+      fac.q = e.target.value;
+      const all = await DataService.getFacilities();
+      const body = document.getElementById('facbody');
+      if (body) { body.innerHTML = facBody(all); hydrate(); }
+      return;
+    }
     if (e.target.id !== 'libq') return;
     const guides = await DataService.getGuides();
     const box = document.getElementById('glist');
@@ -919,7 +1021,7 @@
   });
   window.addEventListener('fl-data', () => {
     const a = document.activeElement;
-    if (['home', 'library', 'search', 'offline', 'updates'].includes(routeName()) && !(a && /INPUT|TEXTAREA/.test(a.tagName))) render();
+    if (['home', 'library', 'search', 'offline', 'updates', 'facilities'].includes(routeName()) && !(a && /INPUT|TEXTAREA/.test(a.tagName))) render();
   });
   window.FL = { esc, icon, t, loc, locRaw, user: () => user, fbState: () => fbState, isAdmin, rerender: () => render() };
   window.addEventListener('fb-ready', startFirebase);
@@ -927,7 +1029,7 @@
   if (window.FB) startFirebase();
 
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !drawer.hidden) closeDrawer(); });
-  window.addEventListener('hashchange', render);
+  window.addEventListener('hashchange', () => { navFocus = true; render(); });
   window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; });
 
   if ('serviceWorker' in navigator) {

@@ -81,6 +81,7 @@ const SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
       /* --- content everyone can read --- */
       listGuides: () => listAll('guides'),
       listUpdates: () => listAll('updates'),
+      listFacilities: () => listAll('facilities'),
       async getImage(id) {
         const snap = await fsMod.getDoc(D('images', id));
         return snap.exists() ? snap.data().data : null;
@@ -93,6 +94,13 @@ const SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
       },
       saveGuide: (id, data) => fsMod.setDoc(D('guides', id), data),
       deleteGuide: (id) => fsMod.deleteDoc(D('guides', id)),
+      saveFacility: (id, data) => fsMod.setDoc(D('facilities', id), data),
+      deleteFacility: (id) => fsMod.deleteDoc(D('facilities', id)),
+      async seedFacilities(list) {
+        const b = fsMod.writeBatch(db);
+        list.forEach(([id, data]) => b.set(D('facilities', id), data));
+        await b.commit();
+      },
       saveUpdate: (id, data) => fsMod.setDoc(D('updates', id), data),
       deleteUpdate: (id) => fsMod.deleteDoc(D('updates', id)),
       async getAudio(id) {
